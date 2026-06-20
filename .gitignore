@@ -1,5 +1,9 @@
-# Build output
-bin/
+# Build output — ignore everything under bin/ except version-controlled
+# runtime files (the app reads Data/Languages.tab from next to the exe).
+/bin/*
+!/bin/Data/
+/bin/Data/*
+!/bin/Data/Languages.tab
 obj/
 
 # Rider / VS
