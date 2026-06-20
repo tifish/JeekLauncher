@@ -52,6 +52,13 @@ public sealed class LauncherViewModel : INotifyPropertyChanged
     public AppEntry? Selected =>
         _selectedIndex >= 0 && _selectedIndex < Results.Count ? Results[_selectedIndex] : null;
 
+    /// <summary>Show a transient message in the status bar (until the next refresh).</summary>
+    public void SetStatus(string text)
+    {
+        StatusText = text;
+        OnPropertyChanged(nameof(StatusText));
+    }
+
     /// <summary>Replace the full catalog (called after a scan completes).</summary>
     public void SetEntries(IReadOnlyList<AppEntry> entries)
     {

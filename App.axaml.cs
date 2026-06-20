@@ -64,6 +64,7 @@ public partial class App : Application
 
             _window = new LauncherWindow(_viewModel);
             _window.LaunchRequested += OnLaunchRequested;
+            _window.QuickWordSetRequested += OnQuickWordSetRequested;
             _window.HideRequested += HideLauncher;
             _window.Opened += OnWindowFirstOpened;
 
@@ -187,6 +188,20 @@ public partial class App : Application
         // Remember the quick word so this query jumps to the top next time.
         _usage.Record(query, entry.Id);
         _usage.Save();
+    }
+
+    // Bind a quick word to an app explicitly, without launching it.
+    private void OnQuickWordSetRequested(AppEntry entry, string word)
+    {
+        string w = word.Trim().ToLowerInvariant();
+        if (w.Length == 0)
+            return;
+
+        _usage.Learned[w] = entry.Id;
+        _usage.Save();
+
+        _quickWordsWindow?.Reload();
+        _viewModel.SetStatus(string.Format(Localizer.Get("QuickWordSaved"), w, entry.Name));
     }
 
     // ---- Scanning ----------------------------------------------------------

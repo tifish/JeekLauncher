@@ -61,7 +61,7 @@ public partial class QuickWordsWindow : Window
         Persist();
     }
 
-    private void Reload()
+    public void Reload()
     {
         if (_usage is null)
             return;

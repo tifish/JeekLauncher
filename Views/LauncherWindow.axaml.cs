@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Jeek.Avalonia.Localization;
 using JeekLauncher.Models;
 using JeekLauncher.ViewModels;
 
@@ -14,6 +15,12 @@ public partial class LauncherWindow : Window
     /// <summary>Raised when the window should be dismissed (Esc / focus lost).</summary>
     public event Action? HideRequested;
 
+    /// <summary>Raised when the user binds a quick word to an app without launching it.</summary>
+    public event Action<AppEntry, string>? QuickWordSetRequested;
+
+    private bool _editingQuickWord;
+    private AppEntry? _quickWordTarget;
+
     public LauncherWindow()
     {
         InitializeComponent();
@@ -23,6 +30,7 @@ public partial class LauncherWindow : Window
         AddHandler(KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
 
         ResultList.DoubleTapped += (_, _) => LaunchSelected();
+        SetQuickWordButton.Click += (_, _) => OpenQuickWordEditor();
         Deactivated += (_, _) => HideRequested?.Invoke();
     }
 
@@ -35,12 +43,39 @@ public partial class LauncherWindow : Window
 
     public void FocusSearch()
     {
+        CloseQuickWordEditor();
         SearchBox.Focus();
         SearchBox.SelectAll();
     }
 
     private void OnPreviewKeyDown(object? sender, KeyEventArgs e)
     {
+        // While the quick-word editor is open, keep keystrokes in its text box and
+        // only react to Enter (save) / Escape (cancel) — never move the list or hide.
+        if (_editingQuickWord)
+        {
+            switch (e.Key)
+            {
+                case Key.Enter:
+                    ConfirmQuickWord();
+                    e.Handled = true;
+                    break;
+                case Key.Escape:
+                    FocusSearch();
+                    e.Handled = true;
+                    break;
+            }
+            return;
+        }
+
+        // Ctrl+G: bind a quick word to the selected app without launching it.
+        if (e.Key == Key.G && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            OpenQuickWordEditor();
+            e.Handled = true;
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.Down:
@@ -91,5 +126,41 @@ public partial class LauncherWindow : Window
     {
         if (Vm.Selected is { } entry)
             LaunchRequested?.Invoke(entry, Vm.Query);
+    }
+
+    private void OpenQuickWordEditor()
+    {
+        if (Vm.Selected is not { } entry)
+        {
+            Vm.SetStatus(Localizer.Get("QuickWordNoSelection"));
+            return;
+        }
+
+        _quickWordTarget = entry;
+        _editingQuickWord = true;
+        QuickWordPrompt.Text = string.Format(Localizer.Get("QuickWordEditorPrompt"), entry.Name);
+        QuickWordBox.Text = string.Empty;
+        QuickWordEditor.IsVisible = true;
+        QuickWordBox.Focus();
+    }
+
+    private void ConfirmQuickWord()
+    {
+        var entry = _quickWordTarget;
+        string word = (QuickWordBox.Text ?? string.Empty).Trim();
+
+        CloseQuickWordEditor();
+
+        if (entry is not null && word.Length > 0)
+            QuickWordSetRequested?.Invoke(entry, word);
+
+        SearchBox.Focus();
+    }
+
+    private void CloseQuickWordEditor()
+    {
+        _editingQuickWord = false;
+        _quickWordTarget = null;
+        QuickWordEditor.IsVisible = false;
     }
 }

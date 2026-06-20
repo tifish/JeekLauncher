@@ -39,10 +39,41 @@
 
             <!-- Status bar -->
             <Border DockPanel.Dock="Bottom" Padding="18,7" Background="#12FFFFFF">
-                <TextBlock Text="{Binding StatusText}"
-                           FontSize="11"
-                           Foreground="#A0FFFFFF"
-                           VerticalAlignment="Center" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding StatusText}"
+                               FontSize="11"
+                               Foreground="#A0FFFFFF"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="1"
+                            x:Name="SetQuickWordButton"
+                            Content="{l:Localize SetQuickWord}"
+                            FontSize="11"
+                            Padding="9,2"
+                            VerticalAlignment="Center"
+                            Background="#22FFFFFF"
+                            Foreground="#E0FFFFFF"
+                            BorderThickness="0"
+                            CornerRadius="5" />
+                </Grid>
+            </Border>
+
+            <!-- Quick-word editor (hidden until "Set quick word" is invoked) -->
+            <Border x:Name="QuickWordEditor"
+                    DockPanel.Dock="Bottom"
+                    IsVisible="False"
+                    Padding="18,10"
+                    Background="#22000000">
+                <StackPanel Spacing="6">
+                    <TextBlock x:Name="QuickWordPrompt"
+                               FontSize="11"
+                               Foreground="#C0FFFFFF"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBox x:Name="QuickWordBox"
+                             FontSize="15"
+                             Padding="6,4"
+                             PlaceholderText="{l:Localize QuickWordEditorWatermark}" />
+                </StackPanel>
             </Border>
 
             <!-- Results -->
