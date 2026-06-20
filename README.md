@@ -76,3 +76,7 @@ dotnet build -c Release
 - **记忆解耦**：快捷词以“查询词 → 目标路径”持久化在 `usage.json`，与实时扫描结果分离，故快捷方式消失后记忆仍在。
 - **开机自启**：写入 `HKCU\…\CurrentVersion\Run`（值为当前 exe 路径），无需管理员权限。
 - **自检**：`JeekLauncher.exe --selftest [all|search|watch|autostart|lang]` 可无界面自测（扫描搜索 / 目录监控 / 开机自启 / 多语言），报告写入 `%TEMP%\jeek-selftest.txt`。
+
+## 许可 (License)
+
+[MIT](LICENSE) © 2026 Tinyfish
