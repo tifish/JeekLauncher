@@ -1,0 +1,44 @@
+	en	zh
+en	English	英文
+zh	Chinese	中文
+AppName	Jeek Launcher	Jeek Launcher
+SearchWatermark	Search by initials (English / pinyin)…	输入英文 / 拼音首字母搜索…
+StatusScanning	Scanning shortcuts…	正在扫描快捷方式…
+StatusNoMatches	No matches	无匹配结果
+StatusResults	{0} results   ·   ↑↓ select   ·   Enter launch   ·   Esc close	{0} 个结果   ·   ↑↓ 选择   ·   Enter 启动   ·   Esc 关闭
+TrayShow	Show	显示
+Rescan	Rescan	重新扫描
+ManageQuickWords	Quick words…	快捷字符串…
+Settings	Settings…	设置…
+OpenConfigFolder	Open config folder	打开配置文件夹
+TrayExit	Exit	退出
+HotkeyRegisterFailedTip	Jeek Launcher — hotkey {0} failed (maybe in use)	Jeek Launcher — 热键 {0} 注册失败（可能被占用）
+SettingsTitle	Settings — Jeek Launcher	设置 — Jeek Launcher
+HotkeyError	Hotkey "{0}" could not be registered — it may be in use by another program. Pick another and save again.	热键 “{0}” 注册失败，可能已被其它程序占用。请换一个组合后再次保存。
+GlobalHotkey	Global hotkey	全局热键
+HotkeyWatermark	e.g. Alt+Space, Ctrl+Alt+Space	例如 Alt+Space、Ctrl+Alt+Space
+HotkeyHint	Ctrl / Alt / Shift / Win plus a letter, digit, Space, F1–F12, etc.	支持 Ctrl / Alt / Shift / Win 组合，加 字母、数字、Space、F1–F12 等。
+StartWithWindows	Start with Windows	开机自动启动
+Language	Language	语言
+FollowSystem	Follow system	跟随系统
+ExtraFolders	Extra folders (Start Menu always included)	额外扫描目录（开始菜单始终包含）
+ExtraFoldersHint	Add or remove folders and save; changes apply and the folders are auto-monitored.	增删目录后保存即可生效，并会自动监控这些目录的变化。
+AddFolder	Add…	添加目录…
+RemoveSelected	Remove	移除选中
+OpenFolder	Open folder	打开此目录
+Remove	Remove	移除
+Save	Save	保存
+Cancel	Cancel	取消
+PickFolderTitle	Select a folder to scan	选择要扫描的目录
+QuickWordsTitle	Quick words — Jeek Launcher	快捷字符串管理 — Jeek Launcher
+QuickWordsIntro	Remembered "quick word → app" mappings. A word is kept even if its shortcut was deleted (shown as "missing"); add, rename or delete them here.	启动过应用后记住的「快捷词 → 应用」。即使快捷方式已被删除，快捷词也会保留（标记为“缺失”），可在此新增、修改或删除。
+AddMapping	Add mapping	新增映射
+QuickWordWatermark	quick word	快捷词
+AppSearchWatermark	type to search apps…	输入以搜索应用…
+Add	Add	添加
+EditWordWatermark	select a row, then edit the quick word here	选中一行后在此修改快捷词，点"重命名"
+Rename	Rename	重命名
+Delete	Delete	删除
+ClearAll	Clear all	清空全部
+StatusExists	OK	存在
+StatusMissing	missing	缺失

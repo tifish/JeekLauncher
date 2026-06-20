@@ -1,0 +1,11 @@
+# Build output
+bin/
+obj/
+
+# Rider / VS
+.idea/
+.vs/
+*.user
+
+# Local config dumps (the app stores real config under %AppData%\JeekLauncher)
+*.selftest.txt

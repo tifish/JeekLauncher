@@ -1,0 +1,81 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:JeekLauncher.ViewModels"
+        xmlns:l="using:Jeek.Avalonia.Localization"
+        x:Class="JeekLauncher.Views.QuickWordsWindow"
+        Title="{l:Localize QuickWordsTitle}"
+        Width="680" Height="560"
+        MinWidth="540" MinHeight="460"
+        WindowStartupLocation="CenterScreen">
+
+    <DockPanel Margin="18">
+
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{l:Localize QuickWordsIntro}"
+                   TextWrapping="Wrap"
+                   Foreground="#A0FFFFFF"
+                   Margin="0,0,0,12" />
+
+        <!-- Manually add a mapping -->
+        <Border DockPanel.Dock="Top"
+                BorderBrush="#22FFFFFF" BorderThickness="1" CornerRadius="6"
+                Padding="10" Margin="0,0,0,12">
+            <StackPanel Spacing="6">
+                <TextBlock Text="{l:Localize AddMapping}" FontWeight="Bold" FontSize="12" />
+                <Grid ColumnDefinitions="160,*,Auto">
+                    <TextBox x:Name="NewWordBox" Grid.Column="0"
+                             PlaceholderText="{l:Localize QuickWordWatermark}" Margin="0,0,8,0" />
+                    <AutoCompleteBox x:Name="AppBox" Grid.Column="1"
+                                     PlaceholderText="{l:Localize AppSearchWatermark}"
+                                     FilterMode="Contains"
+                                     MinimumPrefixLength="1"
+                                     Margin="0,0,8,0" />
+                    <Button x:Name="AddButton" Grid.Column="2" Content="{l:Localize Add}" />
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,12,0,0">
+            <TextBox x:Name="EditBox"
+                     Grid.Column="0"
+                     PlaceholderText="{l:Localize EditWordWatermark}"
+                     Margin="0,0,8,0" />
+            <Button x:Name="RenameButton" Grid.Column="1" Content="{l:Localize Rename}" Margin="0,0,8,0" />
+            <Button x:Name="DeleteButton" Grid.Column="2" Content="{l:Localize Delete}" Margin="0,0,8,0" />
+            <Button x:Name="ClearButton" Grid.Column="3" Content="{l:Localize ClearAll}" />
+        </Grid>
+
+        <Border BorderBrush="#22FFFFFF" BorderThickness="1" CornerRadius="6">
+            <ListBox x:Name="RowsList" Background="Transparent" BorderThickness="0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:QuickWordRow">
+                        <Grid ColumnDefinitions="150,*,110" Height="38">
+                            <Border Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    Margin="0,0,10,0"
+                                    Padding="8,3"
+                                    CornerRadius="5"
+                                    Background="#1FFFFFFF"
+                                    HorizontalAlignment="Left">
+                                <TextBlock Text="{Binding Word}" FontWeight="Bold" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                <TextBlock Text="{Binding TargetName}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding TargetPath}"
+                                           FontSize="10"
+                                           Foreground="#70FFFFFF"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding Status}"
+                                       Foreground="{Binding StatusBrush}"
+                                       VerticalAlignment="Center"
+                                       FontSize="12" />
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+
+    </DockPanel>
+</Window>
