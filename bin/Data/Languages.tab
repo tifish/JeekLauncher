@@ -43,7 +43,6 @@ ClearAll	Clear all	清空全部
 StatusExists	OK	存在
 StatusMissing	missing	缺失
 SetQuickWord	Set quick word (Ctrl+G)	设置快捷词 (Ctrl+G)
-QuickWordEditorPrompt	Quick word for "{0}" — Enter to save, Esc to cancel	为「{0}」设置快捷词 — Enter 保存，Esc 取消
+QuickWordEditorPrompt	Quick word for "{0}" — Enter to save & launch, Esc to cancel	为「{0}」设置快捷词 — Enter 保存并启动，Esc 取消
 QuickWordEditorWatermark	type a quick word…	输入快捷词…
-QuickWordSaved	Quick word "{0}" → {1}	已设置快捷词「{0}」→ {1}
 QuickWordNoSelection	Select an app first, then set a quick word	请先选中一个应用，再设置快捷词

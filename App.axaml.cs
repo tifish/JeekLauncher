@@ -162,6 +162,33 @@ public partial class App : Application
 
     private void OnLaunchRequested(AppEntry entry, string query)
     {
+        if (!LaunchEntry(entry))
+            return;
+
+        // Remember the quick word so this query jumps to the top next time.
+        _usage.Record(query, entry.Id);
+        _usage.Save();
+    }
+
+    // Bind an explicit quick word to an app, then launch it.
+    private void OnQuickWordSetRequested(AppEntry entry, string word)
+    {
+        string w = word.Trim().ToLowerInvariant();
+        if (w.Length == 0)
+            return;
+
+        if (!LaunchEntry(entry))
+            return;
+
+        // Record() both remembers "word -> app" and bumps the launch count.
+        _usage.Record(w, entry.Id);
+        _usage.Save();
+        _quickWordsWindow?.Reload();
+    }
+
+    /// <summary>Hides the launcher and starts the app; returns whether it launched.</summary>
+    private bool LaunchEntry(AppEntry entry)
+    {
         HideLauncher();
 
         try
@@ -182,26 +209,10 @@ public partial class App : Application
         catch
         {
             // Target may be missing/blocked; nothing actionable to show here.
-            return;
+            return false;
         }
 
-        // Remember the quick word so this query jumps to the top next time.
-        _usage.Record(query, entry.Id);
-        _usage.Save();
-    }
-
-    // Bind a quick word to an app explicitly, without launching it.
-    private void OnQuickWordSetRequested(AppEntry entry, string word)
-    {
-        string w = word.Trim().ToLowerInvariant();
-        if (w.Length == 0)
-            return;
-
-        _usage.Learned[w] = entry.Id;
-        _usage.Save();
-
-        _quickWordsWindow?.Reload();
-        _viewModel.SetStatus(string.Format(Localizer.Get("QuickWordSaved"), w, entry.Name));
+        return true;
     }
 
     // ---- Scanning ----------------------------------------------------------
