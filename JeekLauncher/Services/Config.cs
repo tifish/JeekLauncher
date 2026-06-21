@@ -150,7 +150,7 @@ public static class Storage
     }
 }
 
-/// <summary>Roamable user preferences: global hotkey + UI language.</summary>
+/// <summary>Roamable user preferences: global hotkey, UI language, theme, updates.</summary>
 public sealed class AppSettings
 {
     /// <summary>Global hotkey, e.g. "Alt+Space", "Ctrl+Alt+Space".</summary>
@@ -158,6 +158,16 @@ public sealed class AppSettings
 
     /// <summary>UI language: "" (follow system), "en" or "zh".</summary>
     public string Language { get; set; } = "";
+
+    /// <summary>UI theme: "" (follow system), "Light" or "Dark".</summary>
+    public string Theme { get; set; } = "";
+
+    /// <summary>Silently check for updates a few seconds after launch.</summary>
+    public bool CheckUpdateOnStartup { get; set; } = true;
+
+    /// <summary>How often to re-check for updates while running, in hours.
+    /// Allowed values: 0 (never), 6, 24 (daily), 168 (weekly).</summary>
+    public int UpdateCheckIntervalHours { get; set; } = 24;
 
     public static AppSettings Load()
     {

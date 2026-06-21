@@ -6,17 +6,35 @@
 - 默认搜索开始菜单，可以加入定制的目录，收集所有快捷方式并缓存。
 - 支持按单词首字母和拼音首字母搜索，回车启动。
 - 启动一次后，记住快捷单词，后继重复使用。
+- 支持多语言与主题（跟随系统 / 亮色 / 暗色），内置 GitHub 自动更新。
 
 ## 构建与运行 (Build & Run)
 
-需要 **.NET 10 SDK**（Windows）。
+需要 **.NET 10 SDK**（Windows）。本仓库通过 git submodule 引入 [JeekTools.NET](https://github.com/tifish/JeekTools.NET)，克隆时请带上子模块：
 
 ```powershell
-dotnet build -c Release
-./bin/Release/net10.0-windows/JeekLauncher.exe
+git clone --recursive https://github.com/tifish/JeekLauncher.git
+# 已克隆但缺子模块：git submodule update --init --recursive
+```
+
+根目录提供快捷脚本：
+
+```powershell
+.\Build.cmd      # 编译（默认 Debug，可传 Release）
+.\Run.cmd        # 编译并启动
+.\Publish.cmd    # 发布优化版（ReadyToRun + NetBeauty）到 .\publish
+```
+
+也可直接调用 dotnet（输出在仓库根的 `bin` 目录）：
+
+```powershell
+dotnet build JeekLauncher\JeekLauncher.csproj -c Release
+.\bin\JeekLauncher.exe
 ```
 
 程序启动后常驻系统托盘，不显示主窗口。把生成的 `JeekLauncher.exe` 做一个快捷方式放进“启动”文件夹即可开机自启。
+
+> 分发时附带 `bin\Setup.cmd`：它会自动安装 .NET 运行库（`bin\dotnet-install.ps1`）并启动程序。
 
 ## 使用 (Usage)
 
@@ -38,8 +56,11 @@ dotnet build -c Release
 
 - **全局热键** —— 保存后即时生效，无需重启。若热键被其它程序占用，会弹出醒目的红色提示并保留原热键，换一个再保存即可（启动时占用也会自动弹出设置并提示）。
 - **语言 / Language** —— 跟随系统 / English / 中文，保存后**即时切换**，无需重启。
+- **主题 / Theme** —— 跟随系统 / 亮色 / 暗色，保存后即时切换。
 - **开机自动启动** —— 一个复选框即可开关（写入当前用户的注册表 `Run` 项，无需管理员权限）。
+- **设置存储位置** —— 默认（AppData）/ 便携（程序目录）/ 自定义目录；切换时仅迁移可漫游设置（详见「配置」）。
 - **额外扫描目录** —— 增删目录（带文件夹选择器），保存后自动重扫并纳入监控；右键目录可「打开此目录」（或双击）。
+- **更新 / Updates** —— 显示当前版本；可设置「启动时检查更新」与检查频率（从不 / 每 6 小时 / 每天 / 每周），并提供「立即检查」与项目主页链接。更新经 GitHub Releases 下载（自动选用可用镜像），由 `bin\AutoUpdate.ps1` 替换文件后自动重启。
 
 ### 快捷字符串管理 (Quick words)
 
@@ -67,11 +88,14 @@ dotnet build -c Release
   ```json
   {
     "Hotkey": "Alt+Space",
-    "Language": ""
+    "Language": "",
+    "Theme": "",
+    "CheckUpdateOnStartup": true,
+    "UpdateCheckIntervalHours": 24
   }
   ```
 
-  热键支持 `Ctrl` / `Alt` / `Shift` / `Win` 组合加字母、数字、`Space`、`F1`–`F12` 等，如 `Ctrl+Alt+Space`。
+  热键支持 `Ctrl` / `Alt` / `Shift` / `Win` 组合加字母、数字、`Space`、`F1`–`F12` 等，如 `Ctrl+Alt+Space`。`Theme` 取值 `""`（跟随系统）/ `Light` / `Dark`；`UpdateCheckIntervalHours` 取值 `0`（从不）/ `6` / `24` / `168`。
 - `QuickWords.json` — 记住的「快捷词 → 应用」映射（亦可在「快捷字符串管理」里编辑）。
 
 启动时若检测到 `<程序目录>\Config` 存在，则强制便携模式（优先级高于已保存的模式）；切换离开便携模式时会自动迁移并删除该目录。

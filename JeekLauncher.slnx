@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="JeekTools.NET/JeekTools.csproj" />
+  <Project Path="JeekLauncher/JeekLauncher.csproj" />
+</Solution>

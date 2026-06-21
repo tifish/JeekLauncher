@@ -1,15 +1,39 @@
-# Build output — ignore everything under bin/ except version-controlled
-# runtime files (the app reads Data/Languages.tab from next to the exe).
-/bin/*
-!/bin/Data/
-/bin/Data/*
-!/bin/Data/Languages.tab
-obj/
+# Build output
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+artifacts/
+publish/
+Logs/
 
-# Rider / VS
-.idea/
+# Rider / Visual Studio / VS Code
 .vs/
+.idea/
 *.user
+*.suo
+*.userprefs
+.vscode/
 
-# Local config dumps (the app stores real config under %AppData%\JeekLauncher)
+# .NET
+project.lock.json
+*.nuget.props
+*.nuget.targets
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Local self-test dumps
 *.selftest.txt
+
+# Build output lives under bin/, but the version-controlled runtime files
+# (scripts + Data) stay tracked — the app reads Data/Languages.tab next to the exe.
+bin/*
+!bin/*.ps1
+!bin/*.cmd
+!bin/Data/
+!bin/Data/**

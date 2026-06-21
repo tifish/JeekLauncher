@@ -16,6 +16,7 @@ public partial class SettingsWindow : Window
     private readonly ObservableCollection<string> _dirs = new();
     private readonly Func<AppSettings, LocalSettings, bool>? _onSave;
     private readonly Action<StorageMode, string>? _onStorageModeChange;
+    private readonly Action? _onCheckUpdates;
 
     public SettingsWindow()
     {
@@ -31,10 +32,12 @@ public partial class SettingsWindow : Window
     public SettingsWindow(AppSettings settings, LocalSettings local,
         StorageMode mode, string customDir,
         Func<AppSettings, LocalSettings, bool> onSave,
-        Action<StorageMode, string> onStorageModeChange) : this()
+        Action<StorageMode, string> onStorageModeChange,
+        Action onCheckUpdates) : this()
     {
         _onSave = onSave;
         _onStorageModeChange = onStorageModeChange;
+        _onCheckUpdates = onCheckUpdates;
 
         HotkeyBox.Text = settings.Hotkey;
         StartupCheck.IsChecked = AutoStart.IsEnabled();
@@ -42,6 +45,25 @@ public partial class SettingsWindow : Window
         // Language picker: index 0 = follow system, then "en", "zh".
         LanguageBox.ItemsSource = new[] { Localizer.Get("FollowSystem"), "English", "中文" };
         LanguageBox.SelectedIndex = settings.Language switch { "en" => 1, "zh" => 2, _ => 0 };
+
+        // Theme picker: index 0 = follow system, then Light, Dark.
+        ThemeBox.ItemsSource = new[] { Localizer.Get("FollowSystem"), Localizer.Get("ThemeLight"), Localizer.Get("ThemeDark") };
+        ThemeBox.SelectedIndex = settings.Theme switch { "Light" => 1, "Dark" => 2, _ => 0 };
+
+        // Updates section: version label + check-on-startup + interval + actions.
+        VersionText.Text = $"{Localizer.Get("Version")}: " +
+            (AutoUpdateService.IsDevBuild ? Localizer.Get("DevBuild") : AutoUpdateService.GetLocalCommitCount().ToString());
+        UpdateStartupCheck.IsChecked = settings.CheckUpdateOnStartup;
+        UpdateIntervalBox.ItemsSource = new[]
+        {
+            Localizer.Get("UpdateIntervalNone"),
+            Localizer.Get("UpdateInterval6h"),
+            Localizer.Get("UpdateIntervalDaily"),
+            Localizer.Get("UpdateIntervalWeekly"),
+        };
+        UpdateIntervalBox.SelectedIndex = settings.UpdateCheckIntervalHours switch { 6 => 1, 24 => 2, 168 => 3, _ => 0 };
+        CheckUpdatesButton.Click += (_, _) => _onCheckUpdates?.Invoke();
+        HomepageButton.Click += (_, _) => OpenHomepage();
 
         // Storage mode picker: index matches the enum (Default, Portable, Custom).
         StorageModeBox.ItemsSource = new[]
@@ -168,6 +190,9 @@ public partial class SettingsWindow : Window
         {
             Hotkey = hotkey,
             Language = LanguageBox.SelectedIndex switch { 1 => "en", 2 => "zh", _ => "" },
+            Theme = ThemeBox.SelectedIndex switch { 1 => "Light", 2 => "Dark", _ => "" },
+            CheckUpdateOnStartup = UpdateStartupCheck.IsChecked == true,
+            UpdateCheckIntervalHours = UpdateIntervalBox.SelectedIndex switch { 1 => 6, 2 => 24, 3 => 168, _ => 0 },
         };
 
         var local = new LocalSettings
@@ -182,5 +207,17 @@ public partial class SettingsWindow : Window
             Close();
         else
             ShowHotkeyError(hotkey); // keep the window open so the user can fix it
+    }
+
+    private static void OpenHomepage()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(AutoUpdateService.HomepageUrl) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Best effort.
+        }
     }
 }

@@ -37,24 +37,27 @@
 
             <TextBlock Text="{l:Localize GlobalHotkey}" FontWeight="Bold" />
             <TextBox x:Name="HotkeyBox" PlaceholderText="{l:Localize HotkeyWatermark}" />
-            <TextBlock Text="{l:Localize HotkeyHint}" FontSize="11" Foreground="#80FFFFFF" TextWrapping="Wrap" />
+            <TextBlock Text="{l:Localize HotkeyHint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
 
             <TextBlock Text="{l:Localize Language}" FontWeight="Bold" Margin="0,10,0,0" />
             <ComboBox x:Name="LanguageBox" HorizontalAlignment="Left" Width="240" />
+
+            <TextBlock Text="{l:Localize Theme}" FontWeight="Bold" Margin="0,10,0,0" />
+            <ComboBox x:Name="ThemeBox" HorizontalAlignment="Left" Width="240" />
 
             <CheckBox x:Name="StartupCheck" Content="{l:Localize StartWithWindows}" Margin="0,6,0,0" />
 
             <TextBlock Text="{l:Localize StorageMode}" FontWeight="Bold" Margin="0,10,0,0" />
             <ComboBox x:Name="StorageModeBox" HorizontalAlignment="Left" Width="240" />
-            <TextBlock Text="{l:Localize StorageModeHint}" FontSize="11" Foreground="#80FFFFFF" TextWrapping="Wrap" />
+            <TextBlock Text="{l:Localize StorageModeHint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
             <StackPanel x:Name="CustomDirPanel" Orientation="Horizontal" Spacing="8" IsVisible="False">
                 <TextBox x:Name="CustomDirBox" Width="380" PlaceholderText="{l:Localize CustomDirWatermark}" />
                 <Button x:Name="BrowseCustomDirButton" Content="{l:Localize Browse}" />
             </StackPanel>
 
             <TextBlock Text="{l:Localize ExtraFolders}" FontWeight="Bold" Margin="0,12,0,0" />
-            <TextBlock Text="{l:Localize ExtraFoldersHint}" FontSize="11" Foreground="#80FFFFFF" TextWrapping="Wrap" />
-            <Border BorderBrush="#22FFFFFF" BorderThickness="1" CornerRadius="6" Height="170">
+            <TextBlock Text="{l:Localize ExtraFoldersHint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+            <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="6" Height="170">
                 <ListBox x:Name="DirsList" Background="Transparent" BorderThickness="0">
                     <ListBox.ContextMenu>
                         <ContextMenu>
@@ -67,6 +70,18 @@
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button x:Name="AddDirButton" Content="{l:Localize AddFolder}" />
                 <Button x:Name="RemoveDirButton" Content="{l:Localize RemoveSelected}" />
+            </StackPanel>
+
+            <TextBlock Text="{l:Localize Updates}" FontWeight="Bold" Margin="0,12,0,0" />
+            <TextBlock x:Name="VersionText" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <CheckBox x:Name="UpdateStartupCheck" Content="{l:Localize CheckUpdateOnStartup}" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="{l:Localize UpdateCheckInterval}" VerticalAlignment="Center" />
+                <ComboBox x:Name="UpdateIntervalBox" Width="180" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
+                <Button x:Name="CheckUpdatesButton" Content="{l:Localize CheckNow}" />
+                <Button x:Name="HomepageButton" Content="{l:Localize ProjectHomepage}" />
             </StackPanel>
         </StackPanel>
         </ScrollViewer>

@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Threading;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.Win32;
 using Jeek.Avalonia.Localization;
@@ -13,6 +15,9 @@ using JeekLauncher.Models;
 using JeekLauncher.Services;
 using JeekLauncher.ViewModels;
 using JeekLauncher.Views;
+using JeekTools;
+using Microsoft.Extensions.Logging;
+using ZLogger;
 
 namespace JeekLauncher;
 
@@ -42,6 +47,10 @@ public partial class App : Application
     private SettingsWindow? _settingsWindow;
     private QuickWordsWindow? _quickWordsWindow;
     private bool _initialized;
+    private DispatcherTimer? _updateTimer;
+    private bool _updateInProgress;
+
+    private static readonly ILogger Log = LogManager.CreateLogger(nameof(App));
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -61,6 +70,8 @@ public partial class App : Application
 
             _settings = AppSettings.Load();
             ApplyLanguage(_settings.Language);
+            ApplyTheme(_settings.Theme);
+            Log.ZLogInformation($"JeekLauncher starting (build {AutoUpdateService.GetLocalCommitCount()})");
             _usage = UsageStore.Load();
             _quickWords = QuickWordStore.Load();
             _settingsSnapshot = Storage.ReadTextOrNull(Storage.SettingsPath);
@@ -89,6 +100,7 @@ public partial class App : Application
             StartScan();
             SetUpWatcher();
             SetUpConfigWatcher();
+            SetUpUpdates();
 
             // Realize the native window off-screen so we have a handle for the
             // global hotkey, then hide it until summoned (done in OnWindowFirstOpened).
@@ -222,9 +234,10 @@ public partial class App : Application
                 Process.Start(new ProcessStartInfo(entry.Path) { UseShellExecute = true });
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Target may be missing/blocked; nothing actionable to show here.
+            Log.ZLogWarning($"Failed to launch {entry.Path}: {ex.Message}");
             return false;
         }
 
@@ -301,6 +314,8 @@ public partial class App : Application
             _settingsSnapshot = settingsText;
             _settings = AppSettings.Load();
             ApplyLanguage(_settings.Language);
+            ApplyTheme(_settings.Theme);
+            RestartUpdateTimer();
             ReregisterHotkey();
             BuildTrayMenu();
         }
@@ -366,6 +381,7 @@ public partial class App : Application
         menu.Items.Add(TrayItem("Settings", () => Dispatcher.UIThread.Post(() => OpenSettings())));
         menu.Items.Add(TrayItem("OpenConfigFolder", OpenConfigFolder));
         menu.Items.Add(new NativeMenuItemSeparator());
+        menu.Items.Add(TrayItem("CheckForUpdates", () => Dispatcher.UIThread.Post(() => _ = CheckForUpdatesAsync(silent: false))));
         menu.Items.Add(TrayItem("TrayExit", Shutdown));
         _tray.Menu = menu;
     }
@@ -393,7 +409,8 @@ public partial class App : Application
         {
             _settingsWindow = new SettingsWindow(
                 _settings, _local, Storage.EffectiveMode, Storage.CustomDir,
-                ApplySettings, SetStorageMode)
+                ApplySettings, SetStorageMode,
+                () => _ = CheckForUpdatesAsync(silent: false))
             {
                 Icon = _appIcon,
             };
@@ -445,6 +462,8 @@ public partial class App : Application
 
         // Switch language (raises LanguageChanged -> rebuilds tray + status line).
         ApplyLanguage(_settings.Language);
+        ApplyTheme(_settings.Theme);
+        RestartUpdateTimer();
 
         bool hotkeyOk = ReregisterHotkey();
 
@@ -467,6 +486,8 @@ public partial class App : Application
         var hotkey = HotKeyDef.Parse(_settings.Hotkey);
         bool ok = _hotKey.Register(handle, hotkey.Modifiers, hotkey.VirtualKey);
         _hotkeyFailedText = ok ? null : hotkey.Text;
+        if (!ok)
+            Log.ZLogWarning($"Hotkey registration failed: {hotkey.Text}");
         return ok;
     }
 
@@ -481,6 +502,97 @@ public partial class App : Application
 
         if (Localizer.Languages.Contains(language))
             Localizer.Language = language;
+    }
+
+    private void ApplyTheme(string? theme) => RequestedThemeVariant = ThemeVariantFor(theme);
+
+    /// <summary>Maps a stored theme string to an Avalonia theme variant
+    /// ("" / null / unrecognized = follow system).</summary>
+    public static ThemeVariant ThemeVariantFor(string? theme) => theme switch
+    {
+        "Light" => ThemeVariant.Light,
+        "Dark" => ThemeVariant.Dark,
+        _ => ThemeVariant.Default,
+    };
+
+    // ---- Auto-update -------------------------------------------------------
+
+    /// <summary>Runs the optional startup check and (re)arms the periodic timer.</summary>
+    private void SetUpUpdates()
+    {
+        if (_settings.CheckUpdateOnStartup && !AutoUpdateService.IsDevBuild)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                await CheckForUpdatesAsync(silent: true).ConfigureAwait(false);
+            });
+        }
+
+        RestartUpdateTimer();
+    }
+
+    /// <summary>(Re)starts the periodic update-check timer for the current interval setting.</summary>
+    private void RestartUpdateTimer()
+    {
+        _updateTimer?.Stop();
+        _updateTimer = null;
+
+        int hours = _settings.UpdateCheckIntervalHours;
+        if (hours <= 0 || AutoUpdateService.IsDevBuild)
+            return;
+
+        _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(hours) };
+        _updateTimer.Tick += (_, _) => _ = CheckForUpdatesAsync(silent: true);
+        _updateTimer.Start();
+    }
+
+    /// <summary>
+    /// Checks GitHub for a newer release. When one is found, prompts to update now and
+    /// launches the updater on confirmation. A silent check stays quiet when the app is
+    /// already current or the check fails; a manual check reports both outcomes.
+    /// </summary>
+    private async Task CheckForUpdatesAsync(bool silent)
+    {
+        if (_updateInProgress)
+            return;
+        _updateInProgress = true;
+        try
+        {
+            var outcome = await AutoUpdateService.HasUpdateAsync().ConfigureAwait(false);
+
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                switch (outcome)
+                {
+                    case UpdateCheckOutcome.Available:
+                        bool update = await MessageDialog.ShowConfirmAsync(
+                            Localizer.Get("AppName"),
+                            string.Format(Localizer.Get("UpdateAvailable"),
+                                AutoUpdateService.RemoteCommitCount, AutoUpdateService.LocalCommitCount),
+                            Localizer.Get("UpdateNow"), Localizer.Get("Later"), _appIcon);
+                        if (update && AutoUpdateService.LaunchUpdate())
+                            Shutdown();
+                        break;
+
+                    case UpdateCheckOutcome.UpToDate:
+                        if (!silent)
+                            await MessageDialog.ShowInfoAsync(Localizer.Get("AppName"),
+                                string.Format(Localizer.Get("UpToDate"), AutoUpdateService.LocalCommitCount), _appIcon);
+                        break;
+
+                    case UpdateCheckOutcome.Failed:
+                        if (!silent)
+                            await MessageDialog.ShowInfoAsync(Localizer.Get("AppName"),
+                                Localizer.Get("UpdateCheckFailed"), _appIcon);
+                        break;
+                }
+            });
+        }
+        finally
+        {
+            _updateInProgress = false;
+        }
     }
 
     private static WindowIcon? LoadAppIcon()
@@ -538,6 +650,7 @@ public partial class App : Application
     private void Shutdown()
     {
         _hotKey.Unregister();
+        _updateTimer?.Stop();
         _watcher?.Dispose();
         _configWatcher?.Dispose();
         _settingsWindow?.Close();

@@ -13,12 +13,12 @@
         <TextBlock DockPanel.Dock="Top"
                    Text="{l:Localize QuickWordsIntro}"
                    TextWrapping="Wrap"
-                   Foreground="#A0FFFFFF"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                    Margin="0,0,0,12" />
 
         <!-- Manually add a mapping -->
         <Border DockPanel.Dock="Top"
-                BorderBrush="#22FFFFFF" BorderThickness="1" CornerRadius="6"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="6"
                 Padding="10" Margin="0,0,0,12">
             <StackPanel Spacing="6">
                 <TextBlock Text="{l:Localize AddMapping}" FontWeight="Bold" FontSize="12" />
@@ -45,7 +45,7 @@
             <Button x:Name="ClearButton" Grid.Column="3" Content="{l:Localize ClearAll}" />
         </Grid>
 
-        <Border BorderBrush="#22FFFFFF" BorderThickness="1" CornerRadius="6">
+        <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="6">
             <ListBox x:Name="RowsList" Background="Transparent" BorderThickness="0">
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="vm:QuickWordRow">
@@ -55,7 +55,7 @@
                                     Margin="0,0,10,0"
                                     Padding="8,3"
                                     CornerRadius="5"
-                                    Background="#1FFFFFFF"
+                                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
                                     HorizontalAlignment="Left">
                                 <TextBlock Text="{Binding Word}" FontWeight="Bold" />
                             </Border>
@@ -63,7 +63,7 @@
                                 <TextBlock Text="{Binding TargetName}" TextTrimming="CharacterEllipsis" />
                                 <TextBlock Text="{Binding TargetPath}"
                                            FontSize="10"
-                                           Foreground="#70FFFFFF"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                            TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                             <TextBlock Grid.Column="2"

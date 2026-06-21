@@ -12,7 +12,7 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <ApplicationIcon>Assets/jeek.ico</ApplicationIcon>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <OutDir>bin</OutDir>
+    <OutDir>..\bin</OutDir>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <CETCompat>false</CETCompat>
     <PublishReadyToRun>true</PublishReadyToRun>
@@ -58,6 +58,10 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JeekTools.NET\JeekTools.csproj" />
   </ItemGroup>
 
   <ItemGroup>
