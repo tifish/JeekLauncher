@@ -24,7 +24,9 @@ public partial class App : Application
     private static readonly Uri IconUri = new("avares://JeekLauncher/Assets/jeek.png");
 
     private AppSettings _settings = null!;
+    private LocalSettings _local = null!;
     private UsageStore _usage = null!;
+    private QuickWordStore _quickWords = null!;
     private LauncherViewModel _viewModel = null!;
     private LauncherWindow _window = null!;
     private readonly HotKey _hotKey = new();
@@ -33,6 +35,9 @@ public partial class App : Application
     private string? _hotkeyFailedText;
     private EventWaitHandle? _showEvent;
     private DirectoryWatcher? _watcher;
+    private ConfigWatcher? _configWatcher;
+    private string? _settingsSnapshot;
+    private string? _quickWordsSnapshot;
     private IReadOnlyList<AppEntry> _entries = Array.Empty<AppEntry>();
     private SettingsWindow? _settingsWindow;
     private QuickWordsWindow? _quickWordsWindow;
@@ -50,10 +55,17 @@ public partial class App : Application
             Localizer.SetLocalizer(new TabLocalizer(
                 Path.Combine(AppContext.BaseDirectory, "Data", "Languages.tab")));
 
+            // Machine-local settings first: they decide where roamable config is read from.
+            _local = LocalSettings.Load();
+            Storage.SetMode(_local.StorageMode, _local.CustomStorageDir);
+
             _settings = AppSettings.Load();
             ApplyLanguage(_settings.Language);
             _usage = UsageStore.Load();
-            _viewModel = new LauncherViewModel(_usage);
+            _quickWords = QuickWordStore.Load();
+            _settingsSnapshot = Storage.ReadTextOrNull(Storage.SettingsPath);
+            _quickWordsSnapshot = Storage.ReadTextOrNull(Storage.QuickWordsPath);
+            _viewModel = new LauncherViewModel(_usage, _quickWords);
 
             // Refresh code-built strings (tray labels, status line) on language change.
             Localizer.LanguageChanged += (_, _) =>
@@ -76,6 +88,7 @@ public partial class App : Application
             SetUpShowSignal();
             StartScan();
             SetUpWatcher();
+            SetUpConfigWatcher();
 
             // Realize the native window off-screen so we have a handle for the
             // global hotkey, then hide it until summoned (done in OnWindowFirstOpened).
@@ -99,12 +112,11 @@ public partial class App : Application
         {
             Win32Properties.AddWndProcHookCallback(_window, _hotKey.WndProc);
 
-            var hotkey = HotKeyDef.Parse(_settings.Hotkey);
-            if (!_hotKey.Register(handle, hotkey.Modifiers, hotkey.VirtualKey))
+            if (!ReregisterHotkey())
             {
-                _hotkeyFailedText = hotkey.Text;
                 BuildTrayMenu();
-                Dispatcher.UIThread.Post(() => OpenSettings(hotkey.Text));
+                string text = HotKeyDef.Parse(_settings.Hotkey).Text;
+                Dispatcher.UIThread.Post(() => OpenSettings(text));
             }
         }
 
@@ -166,8 +178,10 @@ public partial class App : Application
             return;
 
         // Remember the quick word so this query jumps to the top next time.
-        _usage.Record(query, entry.Id);
+        _usage.Record(entry.Id);
         _usage.Save();
+        _quickWords.Set(query, entry.Id);
+        SaveQuickWords();
     }
 
     // Bind an explicit quick word to an app, then launch it.
@@ -180,9 +194,11 @@ public partial class App : Application
         if (!LaunchEntry(entry))
             return;
 
-        // Record() both remembers "word -> app" and bumps the launch count.
-        _usage.Record(w, entry.Id);
+        // Bump the launch count and bind the explicit quick word to the app.
+        _usage.Record(entry.Id);
         _usage.Save();
+        _quickWords.Set(w, entry.Id);
+        SaveQuickWords();
         _quickWordsWindow?.Reload();
     }
 
@@ -219,10 +235,10 @@ public partial class App : Application
 
     private void StartScan()
     {
-        var settings = _settings;
+        var dirs = _local.ScanDirectories.ToArray();
         var thread = new Thread(() =>
         {
-            var entries = ShortcutScanner.Scan(settings);
+            var entries = ShortcutScanner.Scan(dirs);
             Dispatcher.UIThread.Post(() =>
             {
                 _entries = entries;
@@ -242,7 +258,77 @@ public partial class App : Application
     private void SetUpWatcher()
     {
         _watcher = new DirectoryWatcher(() => Dispatcher.UIThread.Post(StartScan));
-        _watcher.Watch(ShortcutScanner.GetDirectories(_settings));
+        _watcher.Watch(ShortcutScanner.GetDirectories(_local.ScanDirectories));
+    }
+
+    private void SetUpConfigWatcher()
+    {
+        _configWatcher = new ConfigWatcher(() => Dispatcher.UIThread.Post(ReloadConfigFromDisk));
+        _configWatcher.Watch(Storage.RoamableConfigDir);
+    }
+
+    /// <summary>Persists settings and refreshes the snapshot so the watcher ignores our own write.</summary>
+    private void SaveSettings()
+    {
+        _settings.Save();
+        _settingsSnapshot = Storage.ReadTextOrNull(Storage.SettingsPath);
+    }
+
+    /// <summary>Persists quick words and refreshes the snapshot so the watcher ignores our own write.</summary>
+    private void SaveQuickWords()
+    {
+        _quickWords.Save();
+        _quickWordsSnapshot = Storage.ReadTextOrNull(Storage.QuickWordsPath);
+    }
+
+    /// <summary>
+    /// Re-reads the roamable settings / quick words after an external edit (hand-edited
+    /// or synced into the Config folder). Snapshots filter out the app's own writes so
+    /// this only fires for genuine outside changes.
+    /// </summary>
+    private void ReloadConfigFromDisk()
+    {
+        string? settingsText = Storage.ReadTextOrNull(Storage.SettingsPath);
+        string? quickText = Storage.ReadTextOrNull(Storage.QuickWordsPath);
+
+        bool settingsChanged = settingsText != _settingsSnapshot;
+        bool quickChanged = quickText != _quickWordsSnapshot;
+        if (!settingsChanged && !quickChanged)
+            return;
+
+        if (settingsChanged)
+        {
+            _settingsSnapshot = settingsText;
+            _settings = AppSettings.Load();
+            ApplyLanguage(_settings.Language);
+            ReregisterHotkey();
+            BuildTrayMenu();
+        }
+
+        if (quickChanged)
+        {
+            _quickWordsSnapshot = quickText;
+            _quickWords.ReloadFromDisk();
+            _quickWordsWindow?.Reload();
+            _viewModel.Refresh(); // new quick words affect ranking
+        }
+    }
+
+    /// <summary>
+    /// Switches the roamable storage mode. The roamable files are moved by
+    /// <see cref="Storage"/>; here we re-point the watcher and snapshots at the new folder.
+    /// </summary>
+    private void SetStorageMode(StorageMode mode, string customDir)
+    {
+        if (mode == Storage.EffectiveMode &&
+            string.Equals(customDir, Storage.CustomDir, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        Storage.SwitchMode(mode, customDir);
+
+        _settingsSnapshot = Storage.ReadTextOrNull(Storage.SettingsPath);
+        _quickWordsSnapshot = Storage.ReadTextOrNull(Storage.QuickWordsPath);
+        _configWatcher?.Watch(Storage.RoamableConfigDir);
     }
 
     // ---- Tray icon ---------------------------------------------------------
@@ -293,9 +379,9 @@ public partial class App : Application
 
     private void RescanFromDisk()
     {
-        // Reload settings (custom dirs may have been hand-edited) then rescan + re-watch.
-        _settings = AppSettings.Load();
-        _watcher?.Watch(ShortcutScanner.GetDirectories(_settings));
+        // Reload local settings (scan dirs may have been hand-edited) then rescan + re-watch.
+        _local = LocalSettings.Load();
+        _watcher?.Watch(ShortcutScanner.GetDirectories(_local.ScanDirectories));
         StartScan();
     }
 
@@ -305,7 +391,12 @@ public partial class App : Application
     {
         if (_settingsWindow is null)
         {
-            _settingsWindow = new SettingsWindow(_settings, ApplySettings) { Icon = _appIcon };
+            _settingsWindow = new SettingsWindow(
+                _settings, _local, Storage.EffectiveMode, Storage.CustomDir,
+                ApplySettings, SetStorageMode)
+            {
+                Icon = _appIcon,
+            };
             _settingsWindow.Closed += (_, _) => _settingsWindow = null;
             _settingsWindow.Show();
         }
@@ -323,7 +414,7 @@ public partial class App : Application
             return;
         }
 
-        _quickWordsWindow = new QuickWordsWindow(_usage, () => _entries, () => _viewModel.Refresh())
+        _quickWordsWindow = new QuickWordsWindow(_quickWords, () => _entries, OnQuickWordsEdited)
         {
             Icon = _appIcon,
         };
@@ -332,32 +423,51 @@ public partial class App : Application
         _quickWordsWindow.Activate();
     }
 
-    /// <summary>Applies new settings; returns whether the hotkey registered successfully.</summary>
-    private bool ApplySettings(AppSettings newSettings)
+    // The quick-words window persists changes itself; sync our snapshot (so the config
+    // watcher ignores that write) and refresh the result ranking.
+    private void OnQuickWordsEdited()
+    {
+        _quickWordsSnapshot = Storage.ReadTextOrNull(Storage.QuickWordsPath);
+        _viewModel.Refresh();
+    }
+
+    /// <summary>
+    /// Applies new settings (roamable + machine-local); returns whether the hotkey
+    /// registered successfully. Any storage-mode switch has already been applied by the
+    /// settings window before this runs, so saves land in the right folder.
+    /// </summary>
+    private bool ApplySettings(AppSettings newSettings, LocalSettings newLocal)
     {
         _settings = newSettings;
-        _settings.Save();
+        _local = newLocal;
+        SaveSettings();
+        _local.Save();
 
         // Switch language (raises LanguageChanged -> rebuilds tray + status line).
         ApplyLanguage(_settings.Language);
 
-        // Re-register the hotkey live.
-        bool hotkeyOk = true;
-        IntPtr handle = _window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        if (handle != IntPtr.Zero)
-        {
-            var hotkey = HotKeyDef.Parse(_settings.Hotkey);
-            hotkeyOk = _hotKey.Register(handle, hotkey.Modifiers, hotkey.VirtualKey);
-            _hotkeyFailedText = hotkeyOk ? null : hotkey.Text;
-        }
+        bool hotkeyOk = ReregisterHotkey();
 
         BuildTrayMenu(); // refresh tooltip (and labels, if language was unchanged)
 
         // Re-watch the new directory set and rescan.
-        _watcher?.Watch(ShortcutScanner.GetDirectories(_settings));
+        _watcher?.Watch(ShortcutScanner.GetDirectories(_local.ScanDirectories));
         StartScan();
 
         return hotkeyOk;
+    }
+
+    /// <summary>(Re)registers the global hotkey for the current settings; returns success.</summary>
+    private bool ReregisterHotkey()
+    {
+        IntPtr handle = _window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero)
+            return true;
+
+        var hotkey = HotKeyDef.Parse(_settings.Hotkey);
+        bool ok = _hotKey.Register(handle, hotkey.Modifiers, hotkey.VirtualKey);
+        _hotkeyFailedText = ok ? null : hotkey.Text;
+        return ok;
     }
 
     /// <summary>
@@ -390,8 +500,8 @@ public partial class App : Application
     {
         try
         {
-            Storage.EnsureDir();
-            Process.Start(new ProcessStartInfo(Storage.Dir) { UseShellExecute = true });
+            Storage.EnsureRoamableConfigDir();
+            Process.Start(new ProcessStartInfo(Storage.RoamableConfigDir) { UseShellExecute = true });
         }
         catch
         {
@@ -429,6 +539,7 @@ public partial class App : Application
     {
         _hotKey.Unregister();
         _watcher?.Dispose();
+        _configWatcher?.Dispose();
         _settingsWindow?.Close();
         _quickWordsWindow?.Close();
 

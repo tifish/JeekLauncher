@@ -10,7 +10,7 @@ namespace JeekLauncher.Views;
 
 public partial class QuickWordsWindow : Window
 {
-    private readonly UsageStore? _usage;
+    private readonly QuickWordStore? _quickWords;
     private readonly Func<IReadOnlyList<AppEntry>>? _entriesProvider;
     private readonly Action? _onChanged;
     private readonly ObservableCollection<QuickWordRow> _rows = new();
@@ -20,9 +20,9 @@ public partial class QuickWordsWindow : Window
         InitializeComponent();
     }
 
-    public QuickWordsWindow(UsageStore usage, Func<IReadOnlyList<AppEntry>> entriesProvider, Action onChanged) : this()
+    public QuickWordsWindow(QuickWordStore quickWords, Func<IReadOnlyList<AppEntry>> entriesProvider, Action onChanged) : this()
     {
-        _usage = usage;
+        _quickWords = quickWords;
         _entriesProvider = entriesProvider;
         _onChanged = onChanged;
 
@@ -47,14 +47,14 @@ public partial class QuickWordsWindow : Window
 
     private void OnAdd(object? sender, RoutedEventArgs e)
     {
-        if (_usage is null || AppBox.SelectedItem is not AppEntry app)
+        if (_quickWords is null || AppBox.SelectedItem is not AppEntry app)
             return;
 
         string word = (NewWordBox.Text ?? string.Empty).Trim().ToLowerInvariant();
         if (word.Length == 0)
             return;
 
-        _usage.Learned[word] = app.Id;
+        _quickWords.Words[word] = app.Id;
         NewWordBox.Text = string.Empty;
         AppBox.Text = string.Empty;
         AppBox.SelectedItem = null;
@@ -63,13 +63,13 @@ public partial class QuickWordsWindow : Window
 
     public void Reload()
     {
-        if (_usage is null)
+        if (_quickWords is null)
             return;
 
         var entries = _entriesProvider?.Invoke();
 
         _rows.Clear();
-        foreach (var pair in _usage.Learned.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var pair in _quickWords.Words.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
         {
             string path = pair.Value;
             string? liveName = entries?
@@ -87,39 +87,39 @@ public partial class QuickWordsWindow : Window
 
     private void OnRename(object? sender, RoutedEventArgs e)
     {
-        if (_usage is null || RowsList.SelectedItem is not QuickWordRow row)
+        if (_quickWords is null || RowsList.SelectedItem is not QuickWordRow row)
             return;
 
         string newWord = (EditBox.Text ?? string.Empty).Trim().ToLowerInvariant();
         if (newWord.Length == 0 || newWord == row.Word)
             return;
 
-        _usage.Learned.Remove(row.Word);
-        _usage.Learned[newWord] = row.TargetPath;
+        _quickWords.Words.Remove(row.Word);
+        _quickWords.Words[newWord] = row.TargetPath;
         Persist();
     }
 
     private void OnDelete(object? sender, RoutedEventArgs e)
     {
-        if (_usage is null || RowsList.SelectedItem is not QuickWordRow row)
+        if (_quickWords is null || RowsList.SelectedItem is not QuickWordRow row)
             return;
 
-        _usage.Learned.Remove(row.Word);
+        _quickWords.Words.Remove(row.Word);
         Persist();
     }
 
     private void OnClear(object? sender, RoutedEventArgs e)
     {
-        if (_usage is null)
+        if (_quickWords is null)
             return;
 
-        _usage.Learned.Clear();
+        _quickWords.Words.Clear();
         Persist();
     }
 
     private void Persist()
     {
-        _usage!.Save();
+        _quickWords!.Save();
         _onChanged?.Invoke();
         Reload();
     }

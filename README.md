@@ -50,20 +50,49 @@ dotnet build -c Release
 
 ## 配置 (Configuration)
 
-配置位于 `%AppData%\JeekLauncher\`：
+设置分为两类，各自存放在一个 `Config` 目录中。
 
-- `settings.json` — 热键与自定义扫描目录：
+### 可漫游设置（与机器无关）
+
+存于 `Config` 目录，位置由「设置存储位置」决定：
+
+- **默认**：`%AppData%\JeekLauncher\Config`
+- **便携**：`<程序目录>\Config`（可随 U 盘携带）
+- **自定义**：`<自定义目录>\Config`
+
+文件：
+
+- `Settings.json` — 热键与界面语言：
 
   ```json
   {
     "Hotkey": "Alt+Space",
-    "CustomDirectories": [ "D:\\我的快捷方式" ]
+    "Language": ""
   }
   ```
 
   热键支持 `Ctrl` / `Alt` / `Shift` / `Win` 组合加字母、数字、`Space`、`F1`–`F12` 等，如 `Ctrl+Alt+Space`。
-  推荐直接用托盘「设置」界面修改（即时生效）；手动改完此文件后，点托盘“重新扫描”重新载入。
-- `usage.json` — 记住的快捷单词与启动次数（自动维护，亦可在「快捷字符串管理」里编辑）。
+- `QuickWords.json` — 记住的「快捷词 → 应用」映射（亦可在「快捷字符串管理」里编辑）。
+
+启动时若检测到 `<程序目录>\Config` 存在，则强制便携模式（优先级高于已保存的模式）；切换离开便携模式时会自动迁移并删除该目录。
+
+### 本机相关设置（不漫游）
+
+始终存于 `%LocalAppData%\JeekLauncher\Config`：
+
+- `LocalSettings.json` — 存储模式、自定义存储目录、本机扫描目录：
+
+  ```json
+  {
+    "StorageMode": "Default",
+    "CustomStorageDir": "",
+    "ScanDirectories": [ "D:\\我的快捷方式" ]
+  }
+  ```
+
+- `Usage.json` — 各应用的启动次数（用于排序，自动维护）。
+
+推荐直接用托盘「设置」界面修改（即时生效）：可漫游设置改动会自动重新加载；改完本机扫描目录后点托盘“重新扫描”即可。
 
 ## 实现说明 (Implementation notes)
 

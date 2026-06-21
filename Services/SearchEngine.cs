@@ -23,7 +23,7 @@ public static class SearchEngine
     private const long TierUnit = 10_000_000;
     private const long LearnedBoost = 1_000_000_000;
 
-    public static List<AppEntry> Search(string rawQuery, IReadOnlyList<AppEntry> all, UsageStore usage, int limit = 40)
+    public static List<AppEntry> Search(string rawQuery, IReadOnlyList<AppEntry> all, UsageStore usage, QuickWordStore quickWords, int limit = 40)
     {
         string query = rawQuery.Trim().ToLowerInvariant();
 
@@ -37,7 +37,7 @@ public static class SearchEngine
                 .ToList();
         }
 
-        string? learnedId = usage.GetLearned(query);
+        string? learnedId = quickWords.GetTarget(query);
 
         var scored = new List<(AppEntry Entry, long Score)>();
         foreach (var entry in all)

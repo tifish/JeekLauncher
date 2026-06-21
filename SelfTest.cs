@@ -45,10 +45,10 @@ internal static class SelfTest
         var report = new StringBuilder();
         void Line(string s = "") => report.AppendLine(s);
 
-        var settings = AppSettings.Load();
+        var local = LocalSettings.Load();
 
         var watch = Stopwatch.StartNew();
-        var entries = ShortcutScanner.Scan(settings);
+        var entries = ShortcutScanner.Scan(local.ScanDirectories);
         watch.Stop();
 
         Line($"Scanned {entries.Count} shortcuts in {watch.ElapsedMilliseconds} ms");
@@ -60,10 +60,11 @@ internal static class SelfTest
         Line();
 
         var usage = new UsageStore();
+        var quickWords = new QuickWordStore();
 
         void Query(string q)
         {
-            var hits = SearchEngine.Search(q, entries, usage, 6);
+            var hits = SearchEngine.Search(q, entries, usage, quickWords, 6);
             Line($"== Search \"{q}\"  ->  {hits.Count} hits ==");
             foreach (var r in hits)
                 Line($"     {r.Name}   [{r.Initials}]");

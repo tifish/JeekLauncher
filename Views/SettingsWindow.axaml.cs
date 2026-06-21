@@ -14,28 +14,49 @@ namespace JeekLauncher.Views;
 public partial class SettingsWindow : Window
 {
     private readonly ObservableCollection<string> _dirs = new();
-    private readonly Func<AppSettings, bool>? _onSave;
+    private readonly Func<AppSettings, LocalSettings, bool>? _onSave;
+    private readonly Action<StorageMode, string>? _onStorageModeChange;
 
     public SettingsWindow()
     {
         InitializeComponent();
     }
 
-    /// <param name="onSave">
-    /// Applies the settings and returns whether the hotkey registered successfully.
-    /// </param>
-    public SettingsWindow(AppSettings current, Func<AppSettings, bool> onSave) : this()
+    /// <param name="settings">Current roamable settings (hotkey, language).</param>
+    /// <param name="local">Current machine-local settings (scan directories).</param>
+    /// <param name="mode">The storage mode currently in effect.</param>
+    /// <param name="customDir">The custom storage root (for <see cref="StorageMode.Custom"/>).</param>
+    /// <param name="onSave">Applies the settings; returns whether the hotkey registered.</param>
+    /// <param name="onStorageModeChange">Switches storage mode (moves the roamable config files).</param>
+    public SettingsWindow(AppSettings settings, LocalSettings local,
+        StorageMode mode, string customDir,
+        Func<AppSettings, LocalSettings, bool> onSave,
+        Action<StorageMode, string> onStorageModeChange) : this()
     {
         _onSave = onSave;
+        _onStorageModeChange = onStorageModeChange;
 
-        HotkeyBox.Text = current.Hotkey;
+        HotkeyBox.Text = settings.Hotkey;
         StartupCheck.IsChecked = AutoStart.IsEnabled();
 
         // Language picker: index 0 = follow system, then "en", "zh".
         LanguageBox.ItemsSource = new[] { Localizer.Get("FollowSystem"), "English", "中文" };
-        LanguageBox.SelectedIndex = current.Language switch { "en" => 1, "zh" => 2, _ => 0 };
+        LanguageBox.SelectedIndex = settings.Language switch { "en" => 1, "zh" => 2, _ => 0 };
 
-        foreach (string dir in current.CustomDirectories)
+        // Storage mode picker: index matches the enum (Default, Portable, Custom).
+        StorageModeBox.ItemsSource = new[]
+        {
+            Localizer.Get("StorageModeDefault"),
+            Localizer.Get("StorageModePortable"),
+            Localizer.Get("StorageModeCustom"),
+        };
+        StorageModeBox.SelectedIndex = (int)mode;
+        CustomDirBox.Text = customDir;
+        UpdateCustomDirVisibility();
+        StorageModeBox.SelectionChanged += (_, _) => UpdateCustomDirVisibility();
+        BrowseCustomDirButton.Click += OnBrowseCustomDir;
+
+        foreach (string dir in local.ScanDirectories)
             _dirs.Add(dir);
         DirsList.ItemsSource = _dirs;
 
@@ -80,9 +101,28 @@ public partial class SettingsWindow : Window
 
     /// <summary>Shows the hotkey-conflict banner (used on startup and on a failed save).</summary>
     public void ShowHotkeyError(string hotkeyText)
+        => ShowError(string.Format(Localizer.Get("HotkeyError"), hotkeyText));
+
+    private void ShowError(string message)
     {
-        ErrorText.Text = string.Format(Localizer.Get("HotkeyError"), hotkeyText);
+        ErrorText.Text = message;
         ErrorBanner.IsVisible = true;
+    }
+
+    private void UpdateCustomDirVisibility()
+        => CustomDirPanel.IsVisible = StorageModeBox.SelectedIndex == (int)StorageMode.Custom;
+
+    private async void OnBrowseCustomDir(object? sender, RoutedEventArgs e)
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = Localizer.Get("PickFolderTitle"),
+            AllowMultiple = false,
+        });
+
+        string? path = folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        if (!string.IsNullOrEmpty(path))
+            CustomDirBox.Text = path;
     }
 
     private async void OnAddDirectory(object? sender, RoutedEventArgs e)
@@ -111,16 +151,33 @@ public partial class SettingsWindow : Window
     {
         string hotkey = string.IsNullOrWhiteSpace(HotkeyBox.Text) ? "Alt+Space" : HotkeyBox.Text.Trim();
 
+        var mode = (StorageMode)StorageModeBox.SelectedIndex;
+        string customDir = (CustomDirBox.Text ?? string.Empty).Trim();
+        if (mode == StorageMode.Custom && !Path.IsPathFullyQualified(customDir))
+        {
+            ShowError(Localizer.Get("CustomDirRequired")); // keep the window open
+            return;
+        }
+
         AutoStart.SetEnabled(StartupCheck.IsChecked == true);
+
+        // Switch storage mode first so the settings below are saved to the right place.
+        _onStorageModeChange?.Invoke(mode, customDir);
 
         var settings = new AppSettings
         {
             Hotkey = hotkey,
             Language = LanguageBox.SelectedIndex switch { 1 => "en", 2 => "zh", _ => "" },
-            CustomDirectories = _dirs.ToList(),
         };
 
-        bool hotkeyOk = _onSave?.Invoke(settings) ?? true;
+        var local = new LocalSettings
+        {
+            StorageMode = mode,
+            CustomStorageDir = customDir,
+            ScanDirectories = _dirs.ToList(),
+        };
+
+        bool hotkeyOk = _onSave?.Invoke(settings, local) ?? true;
         if (hotkeyOk)
             Close();
         else

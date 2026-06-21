@@ -27,14 +27,14 @@ public static class ShortcutScanner
     /// The directories that get scanned: the all-users and current-user Start Menu
     /// plus any configured custom directories (de-duplicated).
     /// </summary>
-    public static List<string> GetDirectories(AppSettings settings)
+    public static List<string> GetDirectories(IEnumerable<string> customDirectories)
     {
         var directories = new List<string>();
         // The Start Menu roots (all-users + current-user); scanned recursively, so this
         // covers the Programs subfolder plus any shortcuts placed at the root.
         AddSpecialFolder(directories, Environment.SpecialFolder.CommonStartMenu);
         AddSpecialFolder(directories, Environment.SpecialFolder.StartMenu);
-        foreach (string dir in settings.CustomDirectories)
+        foreach (string dir in customDirectories)
         {
             if (!string.IsNullOrWhiteSpace(dir))
                 directories.Add(dir);
@@ -43,14 +43,14 @@ public static class ShortcutScanner
         return directories.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    public static List<AppEntry> Scan(AppSettings settings)
+    public static List<AppEntry> Scan(IEnumerable<string> customDirectories)
     {
         var entries = new List<AppEntry>();
         var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 1) .lnk / .url shortcuts from the Start Menu + custom directories.
-        foreach (string dir in GetDirectories(settings))
+        foreach (string dir in GetDirectories(customDirectories))
         {
             if (!Directory.Exists(dir))
                 continue;

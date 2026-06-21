@@ -10,14 +10,16 @@ namespace JeekLauncher.ViewModels;
 public sealed class LauncherViewModel : INotifyPropertyChanged
 {
     private readonly UsageStore _usage;
+    private readonly QuickWordStore _quickWords;
     private IReadOnlyList<AppEntry> _all = Array.Empty<AppEntry>();
 
     private string _query = string.Empty;
     private int _selectedIndex = -1;
 
-    public LauncherViewModel(UsageStore usage)
+    public LauncherViewModel(UsageStore usage, QuickWordStore quickWords)
     {
         _usage = usage;
+        _quickWords = quickWords;
     }
 
     public ObservableCollection<AppEntry> Results { get; } = new();
@@ -75,7 +77,7 @@ public sealed class LauncherViewModel : INotifyPropertyChanged
 
     public void Refresh()
     {
-        var matches = SearchEngine.Search(_query, _all, _usage);
+        var matches = SearchEngine.Search(_query, _all, _usage, _quickWords);
 
         Results.Clear();
         foreach (var entry in matches)

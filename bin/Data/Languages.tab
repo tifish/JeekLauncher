@@ -19,6 +19,14 @@ GlobalHotkey	Global hotkey	全局热键
 HotkeyWatermark	e.g. Alt+Space, Ctrl+Alt+Space	例如 Alt+Space、Ctrl+Alt+Space
 HotkeyHint	Ctrl / Alt / Shift / Win plus a letter, digit, Space, F1–F12, etc.	支持 Ctrl / Alt / Shift / Win 组合，加 字母、数字、Space、F1–F12 等。
 StartWithWindows	Start with Windows	开机自动启动
+StorageMode	Settings storage	设置存储位置
+StorageModeDefault	Default (AppData)	默认（AppData）
+StorageModePortable	Portable (app folder)	便携（程序目录）
+StorageModeCustom	Custom folder…	自定义目录…
+StorageModeHint	Where roamable settings (hotkey, language, quick words) are stored. Local scan folders and launch counts always stay on this machine.	可漫游设置（热键、语言、快捷词）的存放位置。本机扫描目录与启动次数始终保留在本机。
+CustomDirWatermark	choose a folder (a "Config" subfolder is created inside)…	选择目录（将在其中创建 “Config” 子目录）…
+Browse	Browse…	浏览…
+CustomDirRequired	Please choose a valid custom folder for storage.	请为自定义存储选择一个有效的目录。
 Language	Language	语言
 FollowSystem	Follow system	跟随系统
 ExtraFolders	Extra folders (Start Menu always included)	额外扫描目录（开始菜单始终包含）
