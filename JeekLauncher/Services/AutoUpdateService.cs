@@ -41,8 +41,8 @@ public static class AutoUpdateService
     public static int RemoteCommitCount { get; private set; }
     public static string FailureReason { get; private set; } = "";
 
-    /// <summary>A local build below the CI threshold (10) is a dev build; never offer updates to it.</summary>
-    public static bool IsDevBuild => GetLocalCommitCount() < 10;
+    /// <summary>A dev build has version 0.0.0.0 (major 0); CI bakes the commit count into the major version. Never offer updates to a dev build.</summary>
+    public static bool IsDevBuild => GetLocalCommitCount() == 0;
 
     public static async Task<UpdateCheckOutcome> HasUpdateAsync()
     {
@@ -67,9 +67,9 @@ public static class AutoUpdateService
                 return Fail($"version.txt is not a positive integer: '{remote.Trim()}'");
             RemoteCommitCount = remoteCount;
 
-            // Below the threshold is a local dev build — CI bakes in the real
-            // commit count, which is always well above this.
-            if (LocalCommitCount < 10)
+            // A dev build has version 0.0.0.0; CI bakes the commit count into
+            // the major version, so a real build is always >= 1.
+            if (LocalCommitCount == 0)
                 return Fail("local version unavailable (dev build?)");
 
             // Reuse the chosen mirror for the zip download URL.
