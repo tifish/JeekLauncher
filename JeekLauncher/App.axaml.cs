@@ -407,6 +407,10 @@ public partial class App : Application
     {
         if (_settingsWindow is null)
         {
+            // Suspend the global hotkey while settings is open so pressing a combo into
+            // the capture box records it instead of firing the launcher; restore on close.
+            _hotKey.Unregister();
+
             _settingsWindow = new SettingsWindow(
                 _settings, _local, Storage.EffectiveMode, Storage.CustomDir,
                 ApplySettings, SetStorageMode,
@@ -414,7 +418,11 @@ public partial class App : Application
             {
                 Icon = _appIcon,
             };
-            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+            _settingsWindow.Closed += (_, _) =>
+            {
+                _settingsWindow = null;
+                ReregisterHotkey();
+            };
             _settingsWindow.Show();
         }
 

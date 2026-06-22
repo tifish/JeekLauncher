@@ -40,6 +40,9 @@ public partial class SettingsWindow : Window
         _onCheckUpdates = onCheckUpdates;
 
         HotkeyBox.Text = settings.Hotkey;
+        // Capture the shortcut directly instead of letting the user type it. Tunnel so
+        // we see the keys before the (read-only) TextBox does.
+        HotkeyBox.AddHandler(KeyDownEvent, OnHotkeyKeyDown, RoutingStrategies.Tunnel);
         StartupCheck.IsChecked = AutoStart.IsEnabled();
 
         // Language picker: index 0 = follow system, then "en", "zh".
@@ -93,6 +96,54 @@ public partial class SettingsWindow : Window
         RemoveDirItem.Click += OnRemoveDirectory;
         DirsList.DoubleTapped += (_, _) => OpenSelectedDirectory();
     }
+
+    /// <summary>
+    /// Records the pressed combination into the hotkey box as a canonical
+    /// "Ctrl+Alt+Space" string. Only keys <see cref="HotKeyDef.Parse"/> understands are
+    /// accepted, and ordinary keys require a modifier so a stray letter can't be bound.
+    /// </summary>
+    private void OnHotkeyKeyDown(object? sender, KeyEventArgs e)
+    {
+        // Wait for the real key — a lone modifier press isn't a hotkey yet.
+        if (IsModifierKey(e.Key))
+            return;
+
+        string? token = KeyToToken(e.Key);
+        if (token is null)
+            return; // unsupported key (arrows, etc.) — let it pass through
+
+        bool isFunctionKey = e.Key is >= Key.F1 and <= Key.F24;
+        if (e.KeyModifiers == KeyModifiers.None && !isFunctionKey)
+            return; // bare letter/digit/Space — leave focus navigation intact
+
+        var parts = new List<string>(4);
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) parts.Add("Ctrl");
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Alt)) parts.Add("Alt");
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) parts.Add("Shift");
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Meta)) parts.Add("Win");
+        parts.Add(token);
+
+        HotkeyBox.Text = string.Join("+", parts);
+        e.Handled = true; // swallow so the combo doesn't also act on the box
+    }
+
+    private static bool IsModifierKey(Key key) => key is
+        Key.LeftCtrl or Key.RightCtrl or
+        Key.LeftAlt or Key.RightAlt or
+        Key.LeftShift or Key.RightShift or
+        Key.LWin or Key.RWin;
+
+    /// <summary>Maps an Avalonia key to a token <see cref="HotKeyDef.Parse"/> accepts, else null.</summary>
+    private static string? KeyToToken(Key key) => key switch
+    {
+        >= Key.A and <= Key.Z => key.ToString(),
+        >= Key.D0 and <= Key.D9 => ((char)('0' + (key - Key.D0))).ToString(),
+        >= Key.F1 and <= Key.F24 => key.ToString(),
+        Key.Space => "Space",
+        Key.Enter => "Enter",
+        Key.OemTilde => "`",
+        _ => null,
+    };
 
     private void OnDirsPointerPressed(object? sender, PointerPressedEventArgs e)
     {

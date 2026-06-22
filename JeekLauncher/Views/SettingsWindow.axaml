@@ -36,7 +36,7 @@
             </Border>
 
             <TextBlock Text="{l:Localize GlobalHotkey}" FontWeight="Bold" />
-            <TextBox x:Name="HotkeyBox" PlaceholderText="{l:Localize HotkeyWatermark}" />
+            <TextBox x:Name="HotkeyBox" IsReadOnly="True" PlaceholderText="{l:Localize HotkeyWatermark}" />
             <TextBlock Text="{l:Localize HotkeyHint}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
 
             <TextBlock Text="{l:Localize Language}" FontWeight="Bold" Margin="0,10,0,0" />

@@ -16,8 +16,8 @@ HotkeyRegisterFailedTip	Jeek Launcher — hotkey {0} failed (maybe in use)	Jeek 
 SettingsTitle	Settings — Jeek Launcher	设置 — Jeek Launcher
 HotkeyError	Hotkey "{0}" could not be registered — it may be in use by another program. Pick another and save again.	热键 “{0}” 注册失败，可能已被其它程序占用。请换一个组合后再次保存。
 GlobalHotkey	Global hotkey	全局热键
-HotkeyWatermark	e.g. Alt+Space, Ctrl+Alt+Space	例如 Alt+Space、Ctrl+Alt+Space
-HotkeyHint	Ctrl / Alt / Shift / Win plus a letter, digit, Space, F1–F12, etc.	支持 Ctrl / Alt / Shift / Win 组合，加 字母、数字、Space、F1–F12 等。
+HotkeyWatermark	click here, then press your shortcut	点此后按下快捷键
+HotkeyHint	Click the box and press your shortcut — Ctrl / Alt / Shift / Win with a letter, digit, Space or F1–F12.	点击输入框后按下快捷键 —— Ctrl / Alt / Shift / Win 组合 字母、数字、Space 或 F1–F12。
 StartWithWindows	Start with Windows	开机自动启动
 StorageMode	Settings storage	设置存储位置
 StorageModeDefault	Default (AppData)	默认（AppData）
