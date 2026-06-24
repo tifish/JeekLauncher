@@ -89,12 +89,6 @@ public static class Storage
     public static void EnsureLocalConfigDir() => Directory.CreateDirectory(LocalConfigDir);
     public static void EnsureRoamableConfigDir() => Directory.CreateDirectory(RoamableConfigDir);
 
-    public static string? ReadTextOrNull(string path)
-    {
-        try { return File.Exists(path) ? File.ReadAllText(path) : null; }
-        catch { return null; }
-    }
-
     /// <summary>Primes the active mode from the saved machine-local settings (no migration).</summary>
     public static void SetMode(StorageMode mode, string? customDir)
     {
@@ -102,16 +96,25 @@ public static class Storage
         CustomDir = customDir ?? "";
     }
 
-    private static readonly string[] RoamableFiles = { "Settings.json", "QuickWords.json" };
+    /// <summary>Whether switching would place the new Config directory inside the current one.</summary>
+    public static bool WouldMoveRoamableConfigIntoItself(StorageMode newMode, string? newCustomDir)
+    {
+        string from = RoamableConfigDir;
+        string to = ConfigDirFor(newMode, newCustomDir ?? "");
+        return !PathsEqual(from, to) && IsSubPathOf(to, from);
+    }
 
     /// <summary>
-    /// Switches the roamable storage mode, moving only the roamable files from the
-    /// current folder to the new one. Machine-local data is left untouched. When
+    /// Switches the roamable storage mode, moving the roamable Config contents from
+    /// the current folder to the new one. Machine-local data is left untouched. When
     /// leaving portable mode, the executable-side Config folder is deleted so the next
     /// startup is not forced back into portable.
     /// </summary>
     public static void SwitchMode(StorageMode newMode, string? newCustomDir)
     {
+        if (WouldMoveRoamableConfigIntoItself(newMode, newCustomDir))
+            throw new InvalidOperationException("The new Config directory cannot be inside the current one.");
+
         string from = RoamableConfigDir;
         string to = ConfigDirFor(newMode, newCustomDir ?? "");
         bool leavingPortable = EffectiveMode == StorageMode.Portable && newMode != StorageMode.Portable;
@@ -119,7 +122,7 @@ public static class Storage
         if (!string.Equals(from, to, StringComparison.OrdinalIgnoreCase))
         {
             Directory.CreateDirectory(to);
-            MoveFiles(from, to);
+            MoveDirectoryContents(from, to);
         }
 
         if (leavingPortable)
@@ -131,23 +134,51 @@ public static class Storage
         SetMode(newMode, newCustomDir);
     }
 
-    private static void MoveFiles(string from, string to)
+    private static void MoveDirectoryContents(string from, string to)
     {
-        foreach (string name in RoamableFiles)
+        if (!Directory.Exists(from))
+            return;
+
+        Directory.CreateDirectory(to);
+
+        foreach (string src in Directory.EnumerateFiles(from))
         {
-            string src = Path.Combine(from, name);
-            string dst = Path.Combine(to, name);
+            string dst = Path.Combine(to, Path.GetFileName(src));
             try
             {
-                if (File.Exists(src))
-                    File.Move(src, dst, overwrite: true);
+                File.Move(src, dst, overwrite: true);
             }
             catch
             {
                 // A locked file just stays where it is; best effort.
             }
         }
+
+        foreach (string srcDir in Directory.EnumerateDirectories(from))
+        {
+            string dstDir = Path.Combine(to, Path.GetFileName(srcDir));
+            MoveDirectoryContents(srcDir, dstDir);
+
+            try { Directory.Delete(srcDir, recursive: false); }
+            catch { /* Not empty or locked: leave it. */ }
+        }
     }
+
+    private static bool PathsEqual(string left, string right)
+        => string.Equals(NormalizePath(left), NormalizePath(right), StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSubPathOf(string path, string parent)
+    {
+        string normalizedPath = NormalizePath(path);
+        string normalizedParent = NormalizePath(parent);
+        return normalizedPath.StartsWith(
+            normalizedParent + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePath(string path)
+        => Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }
 
 /// <summary>Roamable user preferences: global hotkey, UI language, theme, updates.</summary>

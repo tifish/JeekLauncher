@@ -2,26 +2,35 @@ using System.Threading;
 
 namespace JeekLauncher.Services;
 
+[Flags]
+internal enum ConfigChangeKind
+{
+    None = 0,
+    Settings = 1,
+    QuickWords = 2,
+}
+
 /// <summary>
-/// Watches the config directory and fires a (debounced) callback when Settings.json
-/// or QuickWords.json changes on disk — e.g. hand-edited, or synced from another
-/// machine in portable mode — so the app can hot-reload them.
+/// Watches the config directory and fires a callback after changes have been quiet
+/// for a while, so externally edited or synced portable config can be hot-reloaded.
 /// </summary>
 internal sealed class ConfigWatcher : IDisposable
 {
-    private const int DebounceMs = 500;
+    private const int QuietPeriodMs = 10_000;
 
-    private static readonly string[] WatchedFiles = { "Settings.json", "QuickWords.json" };
-
-    private readonly Action _onChanged;
+    private readonly Action<ConfigChangeKind> _onChanged;
     private readonly Timer _debounce;
+    private readonly object _gate = new();
     private FileSystemWatcher? _watcher;
+    private string _settingsPath = "";
+    private string _quickWordsPath = "";
+    private ConfigChangeKind _pendingChanges;
     private bool _disposed;
 
-    public ConfigWatcher(Action onChanged)
+    public ConfigWatcher(Action<ConfigChangeKind> onChanged)
     {
         _onChanged = onChanged;
-        _debounce = new Timer(_ => _onChanged(), null, Timeout.Infinite, Timeout.Infinite);
+        _debounce = new Timer(_ => Flush(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
     /// <summary>(Re)start watching the given directory.</summary>
@@ -31,17 +40,21 @@ internal sealed class ConfigWatcher : IDisposable
         if (_disposed || !Directory.Exists(dir))
             return;
 
+        _settingsPath = Path.GetFullPath(Path.Combine(dir, "Settings.json"));
+        _quickWordsPath = Path.GetFullPath(Path.Combine(dir, "QuickWords.json"));
+
         try
         {
             _watcher = new FileSystemWatcher(dir)
             {
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.Size,
             };
             _watcher.Changed += OnEvent;
             _watcher.Created += OnEvent;
             _watcher.Deleted += OnEvent;
             _watcher.Renamed += OnEvent;
-            _watcher.Error += (_, _) => Schedule();
+            _watcher.Error += (_, _) => Schedule(ConfigChangeKind.Settings | ConfigChangeKind.QuickWords);
             _watcher.EnableRaisingEvents = true;
         }
         catch
@@ -52,19 +65,62 @@ internal sealed class ConfigWatcher : IDisposable
 
     private void OnEvent(object sender, FileSystemEventArgs e)
     {
-        string name = Path.GetFileName(e.Name ?? e.FullPath);
-        if (WatchedFiles.Contains(name, StringComparer.OrdinalIgnoreCase))
-            Schedule();
+        var changes = ChangeKindFor(e.FullPath);
+        if (e is RenamedEventArgs renamed)
+            changes |= ChangeKindFor(renamed.OldFullPath);
+
+        if (changes != ConfigChangeKind.None)
+            Schedule(changes);
     }
 
-    private void Schedule()
+    private ConfigChangeKind ChangeKindFor(string path)
     {
-        if (!_disposed)
-            _debounce.Change(DebounceMs, Timeout.Infinite);
+        string fullPath;
+        try { fullPath = Path.GetFullPath(path); }
+        catch { return ConfigChangeKind.None; }
+
+        if (string.Equals(fullPath, _settingsPath, StringComparison.OrdinalIgnoreCase))
+            return ConfigChangeKind.Settings;
+        if (string.Equals(fullPath, _quickWordsPath, StringComparison.OrdinalIgnoreCase))
+            return ConfigChangeKind.QuickWords;
+        return ConfigChangeKind.None;
+    }
+
+    private void Schedule(ConfigChangeKind changes)
+    {
+        if (_disposed)
+            return;
+
+        lock (_gate)
+        {
+            _pendingChanges |= changes;
+            _debounce.Change(QuietPeriodMs, Timeout.Infinite);
+        }
+    }
+
+    private void Flush()
+    {
+        ConfigChangeKind changes;
+        lock (_gate)
+        {
+            if (_disposed || _pendingChanges == ConfigChangeKind.None)
+                return;
+
+            changes = _pendingChanges;
+            _pendingChanges = ConfigChangeKind.None;
+        }
+
+        _onChanged(changes);
     }
 
     private void Stop()
     {
+        lock (_gate)
+        {
+            _pendingChanges = ConfigChangeKind.None;
+            _debounce.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+
         if (_watcher is null)
             return;
 

@@ -226,7 +226,9 @@ public partial class SettingsWindow : Window
 
         var mode = (StorageMode)StorageModeBox.SelectedIndex;
         string customDir = (CustomDirBox.Text ?? string.Empty).Trim();
-        if (mode == StorageMode.Custom && !Path.IsPathFullyQualified(customDir))
+        if (mode == StorageMode.Custom &&
+            (!Path.IsPathFullyQualified(customDir) ||
+             Storage.WouldMoveRoamableConfigIntoItself(mode, customDir)))
         {
             ShowError(Localizer.Get("CustomDirRequired")); // keep the window open
             return;
@@ -235,7 +237,15 @@ public partial class SettingsWindow : Window
         AutoStart.SetEnabled(StartupCheck.IsChecked == true);
 
         // Switch storage mode first so the settings below are saved to the right place.
-        _onStorageModeChange?.Invoke(mode, customDir);
+        try
+        {
+            _onStorageModeChange?.Invoke(mode, customDir);
+        }
+        catch (InvalidOperationException)
+        {
+            ShowError(Localizer.Get("CustomDirRequired")); // keep the window open
+            return;
+        }
 
         var settings = new AppSettings
         {

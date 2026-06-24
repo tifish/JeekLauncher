@@ -100,6 +100,8 @@ dotnet build JeekLauncher\JeekLauncher.csproj -c Release
 
 启动时若检测到 `<程序目录>\Config` 存在，则强制便携模式（优先级高于已保存的模式）；切换离开便携模式时会自动迁移并删除该目录。
 
+程序会监控当前可漫游 `Config` 目录（含子目录）。检测到外部修改后，会等待约 10 秒且期间没有新变化，再重新加载可漫游设置。
+
 ### 本机相关设置（不漫游）
 
 始终存于 `%LocalAppData%\JeekLauncher\Config`：
@@ -116,7 +118,7 @@ dotnet build JeekLauncher\JeekLauncher.csproj -c Release
 
 - `Usage.json` — 各应用的启动次数（用于排序，自动维护）。
 
-推荐直接用托盘「设置」界面修改（即时生效）：可漫游设置改动会自动重新加载；改完本机扫描目录后点托盘“重新扫描”即可。
+推荐直接用托盘「设置」界面修改（即时生效）：可漫游设置的外部改动会自动重新加载；改完本机扫描目录后点托盘“重新扫描”即可。
 
 ## 实现说明 (Implementation notes)
 

@@ -41,8 +41,6 @@ public partial class App : Application
     private EventWaitHandle? _showEvent;
     private DirectoryWatcher? _watcher;
     private ConfigWatcher? _configWatcher;
-    private string? _settingsSnapshot;
-    private string? _quickWordsSnapshot;
     private IReadOnlyList<AppEntry> _entries = Array.Empty<AppEntry>();
     private SettingsWindow? _settingsWindow;
     private QuickWordsWindow? _quickWordsWindow;
@@ -74,8 +72,6 @@ public partial class App : Application
             Log.ZLogInformation($"JeekLauncher starting (build {AutoUpdateService.GetLocalCommitCount()})");
             _usage = UsageStore.Load();
             _quickWords = QuickWordStore.Load();
-            _settingsSnapshot = Storage.ReadTextOrNull(Storage.SettingsPath);
-            _quickWordsSnapshot = Storage.ReadTextOrNull(Storage.QuickWordsPath);
             _viewModel = new LauncherViewModel(_usage, _quickWords);
 
             // Refresh code-built strings (tray labels, status line) on language change.
@@ -193,7 +189,7 @@ public partial class App : Application
         _usage.Record(entry.Id);
         _usage.Save();
         _quickWords.Set(query, entry.Id);
-        SaveQuickWords();
+        _quickWords.Save();
     }
 
     // Bind an explicit quick word to an app, then launch it.
@@ -210,7 +206,7 @@ public partial class App : Application
         _usage.Record(entry.Id);
         _usage.Save();
         _quickWords.Set(w, entry.Id);
-        SaveQuickWords();
+        _quickWords.Save();
         _quickWordsWindow?.Reload();
     }
 
@@ -276,42 +272,18 @@ public partial class App : Application
 
     private void SetUpConfigWatcher()
     {
-        _configWatcher = new ConfigWatcher(() => Dispatcher.UIThread.Post(ReloadConfigFromDisk));
+        _configWatcher = new ConfigWatcher(changes => Dispatcher.UIThread.Post(() => ReloadConfigFromDisk(changes)));
         _configWatcher.Watch(Storage.RoamableConfigDir);
     }
 
-    /// <summary>Persists settings and refreshes the snapshot so the watcher ignores our own write.</summary>
-    private void SaveSettings()
-    {
-        _settings.Save();
-        _settingsSnapshot = Storage.ReadTextOrNull(Storage.SettingsPath);
-    }
-
-    /// <summary>Persists quick words and refreshes the snapshot so the watcher ignores our own write.</summary>
-    private void SaveQuickWords()
-    {
-        _quickWords.Save();
-        _quickWordsSnapshot = Storage.ReadTextOrNull(Storage.QuickWordsPath);
-    }
-
     /// <summary>
-    /// Re-reads the roamable settings / quick words after an external edit (hand-edited
-    /// or synced into the Config folder). Snapshots filter out the app's own writes so
-    /// this only fires for genuine outside changes.
+    /// Re-reads the roamable settings / quick words that changed externally
+    /// (hand-edited or synced into the Config folder).
     /// </summary>
-    private void ReloadConfigFromDisk()
+    private void ReloadConfigFromDisk(ConfigChangeKind changes)
     {
-        string? settingsText = Storage.ReadTextOrNull(Storage.SettingsPath);
-        string? quickText = Storage.ReadTextOrNull(Storage.QuickWordsPath);
-
-        bool settingsChanged = settingsText != _settingsSnapshot;
-        bool quickChanged = quickText != _quickWordsSnapshot;
-        if (!settingsChanged && !quickChanged)
-            return;
-
-        if (settingsChanged)
+        if (changes.HasFlag(ConfigChangeKind.Settings))
         {
-            _settingsSnapshot = settingsText;
             _settings = AppSettings.Load();
             ApplyLanguage(_settings.Language);
             ApplyTheme(_settings.Theme);
@@ -320,9 +292,8 @@ public partial class App : Application
             BuildTrayMenu();
         }
 
-        if (quickChanged)
+        if (changes.HasFlag(ConfigChangeKind.QuickWords))
         {
-            _quickWordsSnapshot = quickText;
             _quickWords.ReloadFromDisk();
             _quickWordsWindow?.Reload();
             _viewModel.Refresh(); // new quick words affect ranking
@@ -341,8 +312,6 @@ public partial class App : Application
 
         Storage.SwitchMode(mode, customDir);
 
-        _settingsSnapshot = Storage.ReadTextOrNull(Storage.SettingsPath);
-        _quickWordsSnapshot = Storage.ReadTextOrNull(Storage.QuickWordsPath);
         _configWatcher?.Watch(Storage.RoamableConfigDir);
     }
 
@@ -448,11 +417,9 @@ public partial class App : Application
         _quickWordsWindow.Activate();
     }
 
-    // The quick-words window persists changes itself; sync our snapshot (so the config
-    // watcher ignores that write) and refresh the result ranking.
+    // The quick-words window persists changes itself; refresh the result ranking.
     private void OnQuickWordsEdited()
     {
-        _quickWordsSnapshot = Storage.ReadTextOrNull(Storage.QuickWordsPath);
         _viewModel.Refresh();
     }
 
@@ -465,7 +432,7 @@ public partial class App : Application
     {
         _settings = newSettings;
         _local = newLocal;
-        SaveSettings();
+        _settings.Save();
         _local.Save();
 
         // Switch language (raises LanguageChanged -> rebuilds tray + status line).
