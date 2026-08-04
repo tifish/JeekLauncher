@@ -8,6 +8,24 @@
 - 启动一次后，记住快捷单词，后继重复使用。
 - 支持多语言与主题（跟随系统 / 亮色 / 暗色），内置 GitHub 自动更新。
 
+## 安装 (Install)
+
+一行命令安装到 `%LOCALAPPDATA%\Programs\JeekLauncher`，自动创建开始菜单快捷方式、开启开机自启并启动程序：
+
+```powershell
+irm https://raw.githubusercontent.com/tifish/JeekLauncher/main/install.ps1 | iex
+```
+
+中国大陆可用镜像地址（下载同样会自动在镜像间切换）：
+
+```powershell
+irm https://ghfast.top/https://raw.githubusercontent.com/tifish/JeekLauncher/main/install.ps1 | iex
+```
+
+未检测到 .NET 10 运行库时，安装脚本会转而运行程序目录中的 `Setup.cmd` 自动安装运行库并启动程序。
+
+卸载：退出程序后删除安装目录、开始菜单快捷方式，以及 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 下的 `JeekLauncher` 项（脚本不写卸载注册表）。
+
 ## 构建与运行 (Build & Run)
 
 需要 **.NET 10 SDK**（Windows）。本仓库通过 git submodule 引入 [JeekTools.NET](https://github.com/tifish/JeekTools.NET)，克隆时请带上子模块：

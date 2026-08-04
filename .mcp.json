@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "jeek-launcher-debug": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        ".\\JeekLauncherDebugMcp.cmd"
+      ],
+      "cwd": "."
+    }
+  }
+}

@@ -8,6 +8,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using Jeek.Avalonia.Localization;
 using JeekLauncher.Services;
+using JeekTools;
 
 namespace JeekLauncher.Views;
 
@@ -15,7 +16,7 @@ public partial class SettingsWindow : Window
 {
     private readonly ObservableCollection<string> _dirs = new();
     private readonly Func<AppSettings, LocalSettings, bool>? _onSave;
-    private readonly Action<StorageMode, string>? _onStorageModeChange;
+    private readonly Action<StorageLocation, string, bool>? _onStorageLocationChange;
     private readonly Action? _onCheckUpdates;
 
     public SettingsWindow()
@@ -25,18 +26,19 @@ public partial class SettingsWindow : Window
 
     /// <param name="settings">Current roamable settings (hotkey, language).</param>
     /// <param name="local">Current machine-local settings (scan directories).</param>
-    /// <param name="mode">The storage mode currently in effect.</param>
-    /// <param name="customDir">The custom storage root (for <see cref="StorageMode.Custom"/>).</param>
+    /// <param name="location">The storage location currently in effect.</param>
+    /// <param name="customDir">The custom storage root (for <see cref="StorageLocation.CustomDirectory"/>).</param>
     /// <param name="onSave">Applies the settings; returns whether the hotkey registered.</param>
-    /// <param name="onStorageModeChange">Switches storage mode (moves the roamable config files).</param>
+    /// <param name="onStorageLocationChange">Switches storage location; the flag says whether to
+    /// move the existing roamable config files along.</param>
     public SettingsWindow(AppSettings settings, LocalSettings local,
-        StorageMode mode, string customDir,
+        StorageLocation location, string customDir,
         Func<AppSettings, LocalSettings, bool> onSave,
-        Action<StorageMode, string> onStorageModeChange,
+        Action<StorageLocation, string, bool> onStorageLocationChange,
         Action onCheckUpdates) : this()
     {
         _onSave = onSave;
-        _onStorageModeChange = onStorageModeChange;
+        _onStorageLocationChange = onStorageLocationChange;
         _onCheckUpdates = onCheckUpdates;
 
         HotkeyBox.Text = settings.Hotkey;
@@ -68,14 +70,15 @@ public partial class SettingsWindow : Window
         CheckUpdatesButton.Click += (_, _) => _onCheckUpdates?.Invoke();
         HomepageButton.Click += (_, _) => OpenHomepage();
 
-        // Storage mode picker: index matches the enum (Default, Portable, Custom).
+        // Storage location picker: index matches StorageLocation
+        // (UserDirectory, ProgramDirectory, CustomDirectory).
         StorageModeBox.ItemsSource = new[]
         {
             Localizer.Get("StorageModeDefault"),
             Localizer.Get("StorageModePortable"),
             Localizer.Get("StorageModeCustom"),
         };
-        StorageModeBox.SelectedIndex = (int)mode;
+        StorageModeBox.SelectedIndex = (int)location;
         CustomDirBox.Text = customDir;
         UpdateCustomDirVisibility();
         StorageModeBox.SelectionChanged += (_, _) => UpdateCustomDirVisibility();
@@ -183,7 +186,7 @@ public partial class SettingsWindow : Window
     }
 
     private void UpdateCustomDirVisibility()
-        => CustomDirPanel.IsVisible = StorageModeBox.SelectedIndex == (int)StorageMode.Custom;
+        => CustomDirPanel.IsVisible = StorageModeBox.SelectedIndex == (int)StorageLocation.CustomDirectory;
 
     private async void OnBrowseCustomDir(object? sender, RoutedEventArgs e)
     {
@@ -220,32 +223,24 @@ public partial class SettingsWindow : Window
             _dirs.Remove(selected);
     }
 
-    private void OnSave(object? sender, RoutedEventArgs e)
+    private async void OnSave(object? sender, RoutedEventArgs e)
     {
         string hotkey = string.IsNullOrWhiteSpace(HotkeyBox.Text) ? "Alt+Space" : HotkeyBox.Text.Trim();
 
-        var mode = (StorageMode)StorageModeBox.SelectedIndex;
+        var location = (StorageLocation)StorageModeBox.SelectedIndex;
         string customDir = (CustomDirBox.Text ?? string.Empty).Trim();
-        if (mode == StorageMode.Custom &&
+        if (location == StorageLocation.CustomDirectory &&
             (!Path.IsPathFullyQualified(customDir) ||
-             Storage.WouldMoveRoamableConfigIntoItself(mode, customDir)))
+             Storage.WouldMoveRoamableConfigIntoItself(location, customDir)))
         {
             ShowError(Localizer.Get("CustomDirRequired")); // keep the window open
             return;
         }
+
+        if (!await TryApplyStorageLocationAsync(location, customDir))
+            return; // cancelled or invalid — keep the window open
 
         AutoStart.SetEnabled(StartupCheck.IsChecked == true);
-
-        // Switch storage mode first so the settings below are saved to the right place.
-        try
-        {
-            _onStorageModeChange?.Invoke(mode, customDir);
-        }
-        catch (InvalidOperationException)
-        {
-            ShowError(Localizer.Get("CustomDirRequired")); // keep the window open
-            return;
-        }
 
         var settings = new AppSettings
         {
@@ -258,7 +253,7 @@ public partial class SettingsWindow : Window
 
         var local = new LocalSettings
         {
-            StorageMode = mode,
+            StorageLocation = location,
             CustomStorageDir = customDir,
             ScanDirectories = _dirs.ToList(),
         };
@@ -268,6 +263,61 @@ public partial class SettingsWindow : Window
             Close();
         else
             ShowHotkeyError(hotkey); // keep the window open so the user can fix it
+    }
+
+    /// <summary>
+    /// Applies a storage-location change before the settings are saved, so they land in the
+    /// right folder. Asks first whether to bring the existing roamable config along; leaving
+    /// portable mode has to move it, because the executable-side folder is deleted and any
+    /// file left there would be lost. Returns false when the user backed out.
+    /// </summary>
+    private async Task<bool> TryApplyStorageLocationAsync(StorageLocation location, string customDir)
+    {
+        if (!Storage.WouldChangeRoamableConfigDir(location, customDir))
+            return true;
+
+        string title = Localizer.Get("AppName");
+        string from = Storage.RoamableConfigDir;
+        string to = Storage.ConfigRootFor(location, customDir);
+        bool leavingPortable = Storage.EffectiveLocation == StorageLocation.ProgramDirectory
+                               && location != StorageLocation.ProgramDirectory;
+
+        bool moveFiles;
+        if (leavingPortable)
+        {
+            // Not a choice: the portable folder is removed on the way out.
+            if (!await MessageDialog.ShowConfirmAsync(title,
+                    string.Format(Localizer.Get("MoveConfigRequired"), from, to),
+                    Localizer.Get("MoveConfigMove"), Localizer.Get("Cancel")))
+            {
+                return false;
+            }
+
+            moveFiles = true;
+        }
+        else
+        {
+            moveFiles = await MessageDialog.ShowConfirmAsync(title,
+                string.Format(Localizer.Get("MoveConfigQuestion"), from, to),
+                Localizer.Get("MoveConfigMove"), Localizer.Get("MoveConfigKeep"));
+        }
+
+        try
+        {
+            _onStorageLocationChange?.Invoke(location, customDir, moveFiles);
+        }
+        catch (InvalidOperationException)
+        {
+            ShowError(Localizer.Get("CustomDirRequired"));
+            return false;
+        }
+        catch (Exception ex)
+        {
+            ShowError(string.Format(Localizer.Get("MoveConfigFailed"), ex.Message));
+            return false;
+        }
+
+        return true;
     }
 
     private static void OpenHomepage()

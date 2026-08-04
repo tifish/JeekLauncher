@@ -23,8 +23,10 @@ namespace JeekLauncher;
 
 public partial class App : Application
 {
-    public const string MutexName = "JeekLauncher.SingleInstance.{B3F9A2C1-7E54-4D8B-9A1F-6C2E0D5B8E11}";
-    public const string ShowEventName = "JeekLauncher.Show.{B3F9A2C1-7E54-4D8B-9A1F-6C2E0D5B8E11}";
+    /// <summary>Single-instance lock. Debug scopes it per worktree; see <see cref="DebugInstanceContext"/>.</summary>
+    public static string MutexName => DebugInstanceContext.SingleInstanceMutexName;
+
+    public static string ShowEventName => DebugInstanceContext.ShowEventName;
 
     private static readonly Uri IconUri = new("avares://JeekLauncher/Assets/jeek.png");
 
@@ -52,6 +54,33 @@ public partial class App : Application
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
+    // ---- Debug MCP surface -------------------------------------------------
+    // Live state and actions the Debug MCP tools read and drive. See DebugMcpServer;
+    // these exist because an agent cannot press the global hotkey or watch the tray.
+
+    internal LauncherWindow DebugWindow => _window;
+    internal LauncherViewModel DebugViewModel => _viewModel;
+    internal IReadOnlyList<AppEntry> DebugEntries => _entries;
+    internal AppSettings DebugSettings => _settings;
+    internal LocalSettings DebugLocalSettings => _local;
+    internal UsageStore DebugUsage => _usage;
+    internal QuickWordStore DebugQuickWords => _quickWords;
+
+    /// <summary>Hotkey text that failed to register, or null when the hotkey is held.</summary>
+    internal string? DebugHotkeyFailure => _hotkeyFailedText;
+
+    internal void DebugShowLauncher() => ShowLauncher();
+
+    internal void DebugHideLauncher() => HideLauncher();
+
+    /// <summary>Rescans the shortcut directories and completes once the catalog is replaced.</summary>
+    internal Task DebugRescanAsync()
+    {
+        var completion = new TaskCompletionSource();
+        RescanFromDisk(() => completion.TrySetResult());
+        return completion.Task;
+    }
+
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -64,7 +93,7 @@ public partial class App : Application
 
             // Machine-local settings first: they decide where roamable config is read from.
             _local = LocalSettings.Load();
-            Storage.SetMode(_local.StorageMode, _local.CustomStorageDir);
+            Storage.SetLocation(_local.StorageLocation, _local.CustomStorageDir);
 
             _settings = AppSettings.Load();
             ApplyLanguage(_settings.Language);
@@ -97,6 +126,7 @@ public partial class App : Application
             SetUpWatcher();
             SetUpConfigWatcher();
             SetUpUpdates();
+            SetUpDebugMcp(desktop);
 
             // Realize the native window off-screen so we have a handle for the
             // global hotkey, then hide it until summoned (done in OnWindowFirstOpened).
@@ -242,7 +272,8 @@ public partial class App : Application
 
     // ---- Scanning ----------------------------------------------------------
 
-    private void StartScan()
+    /// <param name="onCompleted">Runs on the UI thread once the new catalog is in place.</param>
+    private void StartScan(Action? onCompleted = null)
     {
         var dirs = _local.ScanDirectories.ToArray();
         var thread = new Thread(() =>
@@ -252,6 +283,7 @@ public partial class App : Application
             {
                 _entries = entries;
                 _viewModel.SetEntries(entries);
+                onCompleted?.Invoke();
             });
         })
         {
@@ -266,7 +298,7 @@ public partial class App : Application
 
     private void SetUpWatcher()
     {
-        _watcher = new DirectoryWatcher(() => Dispatcher.UIThread.Post(StartScan));
+        _watcher = new DirectoryWatcher(() => Dispatcher.UIThread.Post(() => StartScan()));
         _watcher.Watch(ShortcutScanner.GetDirectories(_local.ScanDirectories));
     }
 
@@ -301,16 +333,27 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Switches the roamable storage mode. The roamable files are moved by
-    /// <see cref="Storage"/>; here we re-point the watcher and snapshots at the new folder.
+    /// Switches the roamable storage location. <see cref="Storage"/> moves (or does not move)
+    /// the config files; here we re-point the watcher at the new folder and make sure the
+    /// roamable files exist there even when nothing was carried over.
     /// </summary>
-    private void SetStorageMode(StorageMode mode, string customDir)
+    private void SetStorageLocation(StorageLocation location, string customDir, bool moveFiles)
     {
-        if (mode == Storage.EffectiveMode &&
-            string.Equals(customDir, Storage.CustomDir, StringComparison.OrdinalIgnoreCase))
+        if (!Storage.WouldChangeRoamableConfigDir(location, customDir))
+        {
+            Storage.SetLocation(location, customDir);
             return;
+        }
 
-        Storage.SwitchMode(mode, customDir);
+        Storage.SwitchLocation(location, customDir, moveFiles);
+
+        if (!moveFiles)
+        {
+            // Nothing was carried over, so the destination has no file to merge into:
+            // write the in-memory state out whole.
+            _settings.Save(forceAllLocal: true);
+            _quickWords.Save();
+        }
 
         _configWatcher?.Watch(Storage.RoamableConfigDir);
     }
@@ -344,7 +387,7 @@ public partial class App : Application
 
         var menu = new NativeMenu();
         menu.Items.Add(TrayItem("TrayShow", () => Dispatcher.UIThread.Post(ShowLauncher)));
-        menu.Items.Add(TrayItem("Rescan", () => Dispatcher.UIThread.Post(RescanFromDisk)));
+        menu.Items.Add(TrayItem("Rescan", () => Dispatcher.UIThread.Post(() => RescanFromDisk())));
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(TrayItem("ManageQuickWords", () => Dispatcher.UIThread.Post(OpenQuickWords)));
         menu.Items.Add(TrayItem("Settings", () => Dispatcher.UIThread.Post(() => OpenSettings())));
@@ -362,12 +405,12 @@ public partial class App : Application
         return item;
     }
 
-    private void RescanFromDisk()
+    private void RescanFromDisk(Action? onCompleted = null)
     {
         // Reload local settings (scan dirs may have been hand-edited) then rescan + re-watch.
         _local = LocalSettings.Load();
         _watcher?.Watch(ShortcutScanner.GetDirectories(_local.ScanDirectories));
-        StartScan();
+        StartScan(onCompleted);
     }
 
     // ---- Settings & quick-string windows -----------------------------------
@@ -381,8 +424,8 @@ public partial class App : Application
             _hotKey.Unregister();
 
             _settingsWindow = new SettingsWindow(
-                _settings, _local, Storage.EffectiveMode, Storage.CustomDir,
-                ApplySettings, SetStorageMode,
+                _settings, _local, Storage.EffectiveLocation, Storage.CustomDir,
+                ApplySettings, SetStorageLocation,
                 () => _ = CheckForUpdatesAsync(silent: false))
             {
                 Icon = _appIcon,
@@ -523,9 +566,11 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Checks GitHub for a newer release. When one is found, prompts to update now and
-    /// launches the updater on confirmation. A silent check stays quiet when the app is
-    /// already current or the check fails; a manual check reports both outcomes.
+    /// Checks GitHub for a newer release and, when there is one, downloads it in the
+    /// background before asking anything — the single prompt the user sees is "restart and
+    /// install now?", once the package is on disk and verified. Declining keeps the package,
+    /// so the next check reuses it instead of downloading again. A silent check stays quiet
+    /// when the app is already current or something failed; a manual check reports both.
     /// </summary>
     private async Task CheckForUpdatesAsync(bool silent)
     {
@@ -536,38 +581,86 @@ public partial class App : Application
         {
             var outcome = await AutoUpdateService.HasUpdateAsync().ConfigureAwait(false);
 
+            if (outcome != UpdateCheckOutcome.Available)
+            {
+                if (!silent)
+                {
+                    string message = outcome == UpdateCheckOutcome.UpToDate
+                        ? string.Format(Localizer.Get("UpToDate"), AutoUpdateService.LocalCommitCount)
+                        : Localizer.Get("UpdateCheckFailed");
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                        MessageDialog.ShowInfoAsync(Localizer.Get("AppName"), message, _appIcon));
+                }
+
+                return;
+            }
+
+            // Download first, ask second. Progress goes to the tray tooltip — the launcher
+            // has no status bar, and the window is hidden most of the time.
+            string? packageDir = AutoUpdateService.TryGetReusableStagedPackageDir();
+            if (packageDir is null)
+            {
+                var progress = new Progress<UpdateDownloadProgress>(ShowDownloadProgress);
+                packageDir = await AutoUpdateService.DownloadAndStageAsync(progress).ConfigureAwait(false);
+                await Dispatcher.UIThread.InvokeAsync(BuildTrayMenu); // clear the progress tooltip
+            }
+
+            if (packageDir is null)
+            {
+                Log.ZLogWarning($"Update download failed: {AutoUpdateService.FailureReason}");
+                if (!silent)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() => MessageDialog.ShowInfoAsync(
+                        Localizer.Get("AppName"),
+                        string.Format(Localizer.Get("UpdateDownloadFailed"), AutoUpdateService.FailureReason),
+                        _appIcon));
+                }
+
+                return;
+            }
+
             await Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                switch (outcome)
-                {
-                    case UpdateCheckOutcome.Available:
-                        bool update = await MessageDialog.ShowConfirmAsync(
-                            Localizer.Get("AppName"),
-                            string.Format(Localizer.Get("UpdateAvailable"),
-                                AutoUpdateService.RemoteCommitCount, AutoUpdateService.LocalCommitCount),
-                            Localizer.Get("UpdateNow"), Localizer.Get("Later"), _appIcon);
-                        if (update && AutoUpdateService.LaunchUpdate())
-                            Shutdown();
-                        break;
+                bool install = await MessageDialog.ShowConfirmAsync(
+                    Localizer.Get("AppName"),
+                    string.Format(Localizer.Get("UpdateReady"),
+                        AutoUpdateService.RemoteCommitCount, AutoUpdateService.LocalCommitCount),
+                    Localizer.Get("RestartAndInstall"), Localizer.Get("Later"), _appIcon);
+                if (!install)
+                    return; // package stays staged for the next check
 
-                    case UpdateCheckOutcome.UpToDate:
-                        if (!silent)
-                            await MessageDialog.ShowInfoAsync(Localizer.Get("AppName"),
-                                string.Format(Localizer.Get("UpToDate"), AutoUpdateService.LocalCommitCount), _appIcon);
-                        break;
+                // Flush everything before handing the install over: the script waits for
+                // this process to exit and then replaces the program directory.
+                _settings.Save();
+                _local.Save();
+                _usage.Save();
+                _quickWords.Save();
 
-                    case UpdateCheckOutcome.Failed:
-                        if (!silent)
-                            await MessageDialog.ShowInfoAsync(Localizer.Get("AppName"),
-                                Localizer.Get("UpdateCheckFailed"), _appIcon);
-                        break;
-                }
+                if (AutoUpdateService.LaunchInstall(packageDir))
+                    Shutdown();
             });
         }
         finally
         {
             _updateInProgress = false;
         }
+    }
+
+    /// <summary>Reports download progress through the tray tooltip.</summary>
+    private void ShowDownloadProgress(UpdateDownloadProgress progress)
+    {
+        if (_tray is null)
+            return;
+
+        string text = progress.TotalBytes is > 0
+            ? $"{progress.ReceivedBytes * 100 / progress.TotalBytes.Value}%"
+            : $"{progress.ReceivedBytes / 1024 / 1024} MB";
+        string tooltip = string.Format(Localizer.Get("UpdateDownloading"), text);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_tray is not null)
+                _tray.ToolTipText = tooltip;
+        });
     }
 
     private static WindowIcon? LoadAppIcon()
@@ -593,6 +686,36 @@ public partial class App : Application
         catch
         {
             // Best effort.
+        }
+    }
+
+    // ---- Debug MCP ---------------------------------------------------------
+
+    /// <summary>
+    /// Installs the fixed per-user stdio adapter, registers this build behind it, and starts
+    /// the named-pipe MCP host. Only Debug builds actually listen; the registration still runs
+    /// in Release so a shipped install can carry the adapter for a future product surface.
+    /// Failures here must never keep the launcher from starting.
+    /// </summary>
+    private void SetUpDebugMcp(IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        try
+        {
+            McpAdapterRegistration.RegisterCurrentInstance();
+        }
+        catch (Exception ex)
+        {
+            Log.ZLogWarning($"Could not register the MCP adapter: {ex.Message}");
+        }
+
+        try
+        {
+            DebugMcpServer.Start();
+            desktop.Exit += (_, _) => DebugMcpServer.Stop();
+        }
+        catch (Exception ex)
+        {
+            Log.ZLogWarning($"Could not start the Debug MCP server: {ex.Message}");
         }
     }
 

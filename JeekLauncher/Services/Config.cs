@@ -1,184 +1,118 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using JeekTools;
 
 namespace JeekLauncher.Services;
 
-/// <summary>How roamable settings are stored. Machine-local data ignores this.</summary>
-public enum StorageMode
-{
-    /// <summary>Roaming AppData: <c>%AppData%\JeekLauncher\Config</c>.</summary>
-    Default,
-
-    /// <summary>Next to the executable: <c>&lt;app&gt;\Config</c> (carry on a USB stick).</summary>
-    Portable,
-
-    /// <summary>A user-chosen folder: <c>&lt;custom&gt;\Config</c>.</summary>
-    Custom,
-}
-
 /// <summary>
-/// Resolves on-disk config locations and the active roamable storage mode.
+/// On-disk locations for this app's config, layered over the generic
+/// <see cref="SettingsStorage"/> path scheme in JeekTools.
 ///
 /// <para><b>Machine-local</b> data (usage counts, local scan paths, and the chosen
-/// storage mode itself) never roams — it always lives in
+/// storage location itself) never roams — it always lives in
 /// <c>%LocalAppData%\JeekLauncher\Config</c>.</para>
 ///
 /// <para><b>Roamable</b> data (settings + quick words) lives in a <c>Config</c> folder
-/// whose parent depends on the mode: roaming AppData (default), next to the executable
-/// (portable), or a custom folder. If the portable <c>Config</c> folder exists at
-/// startup, portable mode is forced regardless of the saved mode.</para>
+/// whose parent depends on the location: roaming AppData (default), next to the
+/// executable (portable), or a custom folder. If the portable <c>Config</c> folder
+/// exists at startup, portable mode is forced regardless of the saved location.</para>
 /// </summary>
 public static class Storage
 {
-    private const string AppName = "JeekLauncher";
-    private const string ConfigFolder = "Config";
+    private static readonly SettingsStorage Backing = new("JeekLauncher");
 
     // ---- Machine-local (never roams) ---------------------------------------
 
-    /// <summary>Local AppData base for this app.</summary>
-    public static string LocalDir { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppName);
+    public static string LocalConfigDir => Backing.LocalConfigDir;
 
-    /// <summary>Machine-local config folder — always here, whatever the mode.</summary>
-    public static string LocalConfigDir => Path.Combine(LocalDir, ConfigFolder);
+    /// <summary>Machine-local settings file (<c>settings.json</c> in local AppData).</summary>
+    public static string LocalSettingsPath => Backing.MachineSettingsPath;
 
-    public static string LocalSettingsPath => Path.Combine(LocalConfigDir, "LocalSettings.json");
     public static string UsagePath => Path.Combine(LocalConfigDir, "Usage.json");
+
+    /// <summary>Pre-<see cref="SettingsStorage"/> machine-local file, migrated on first load.</summary>
+    internal static string LegacyLocalSettingsPath => Path.Combine(LocalConfigDir, "LocalSettings.json");
 
     // ---- Roamable (location depends on the mode) ---------------------------
 
-    /// <summary>Default (roaming AppData) config folder.</summary>
-    public static string AppDataConfigDir { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), AppName, ConfigFolder);
+    /// <summary>The saved roamable storage location (before the portable-folder override).</summary>
+    public static StorageLocation Location { get; private set; } = StorageLocation.UserDirectory;
 
-    /// <summary>Portable config folder next to the executable.</summary>
-    public static string PortableConfigDir { get; } = Path.Combine(AppContext.BaseDirectory, ConfigFolder);
-
-    /// <summary>The active roamable mode (before the portable-folder override).</summary>
-    public static StorageMode Mode { get; private set; } = StorageMode.Default;
-
-    /// <summary>Custom storage root for <see cref="StorageMode.Custom"/>; the "Config" child is appended.</summary>
+    /// <summary>Base folder for <see cref="StorageLocation.CustomDirectory"/>; the "Config" child is appended.</summary>
     public static string CustomDir { get; private set; } = "";
 
     /// <summary>The portable Config folder exists, forcing portable mode at startup.</summary>
-    public static bool PortableForced => Directory.Exists(PortableConfigDir);
+    public static bool PortableForced => Backing.IsPortable;
 
-    /// <summary>The mode actually in effect (an existing portable folder overrides the saved mode).</summary>
-    public static StorageMode EffectiveMode => PortableForced ? StorageMode.Portable : Mode;
+    /// <summary>The location actually in effect (an existing portable folder overrides the saved one).</summary>
+    public static StorageLocation EffectiveLocation => Backing.ResolveEffectiveLocation(Location);
 
-    /// <summary>Where roamable settings (Settings.json + QuickWords.json) live right now.</summary>
-    public static string RoamableConfigDir => ConfigDirFor(EffectiveMode, CustomDir);
+    /// <summary>Where roamable settings (settings.json + QuickWords.json) live right now.</summary>
+    public static string RoamableConfigDir => ConfigRootFor(EffectiveLocation, CustomDir);
 
-    public static string SettingsPath => Path.Combine(RoamableConfigDir, "Settings.json");
+    public static string SettingsPath => Path.Combine(RoamableConfigDir, "settings.json");
     public static string QuickWordsPath => Path.Combine(RoamableConfigDir, "QuickWords.json");
 
-    private static string ConfigDirFor(StorageMode mode, string customDir) => mode switch
-    {
-        StorageMode.Portable => PortableConfigDir,
-        StorageMode.Custom when customDir.Length > 0 => Path.Combine(customDir, ConfigFolder),
-        _ => AppDataConfigDir,
-    };
+    public static string ConfigRootFor(StorageLocation location, string? customDir)
+        => Backing.ResolveConfigRoot(location, customDir);
 
-    public static readonly JsonSerializerOptions JsonOptions = new()
+    /// <summary>Primes the active location from the saved machine-local settings (no migration).</summary>
+    public static void SetLocation(StorageLocation location, string? customDir)
     {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter() },
-    };
-
-    public static void EnsureLocalConfigDir() => Directory.CreateDirectory(LocalConfigDir);
-    public static void EnsureRoamableConfigDir() => Directory.CreateDirectory(RoamableConfigDir);
-
-    /// <summary>Primes the active mode from the saved machine-local settings (no migration).</summary>
-    public static void SetMode(StorageMode mode, string? customDir)
-    {
-        Mode = mode;
+        Location = Backing.NormalizeLocation(location);
         CustomDir = customDir ?? "";
     }
 
     /// <summary>Whether switching would place the new Config directory inside the current one.</summary>
-    public static bool WouldMoveRoamableConfigIntoItself(StorageMode newMode, string? newCustomDir)
+    public static bool WouldMoveRoamableConfigIntoItself(StorageLocation newLocation, string? newCustomDir)
     {
-        string from = RoamableConfigDir;
-        string to = ConfigDirFor(newMode, newCustomDir ?? "");
-        return !PathsEqual(from, to) && IsSubPathOf(to, from);
+        string from = NormalizePath(RoamableConfigDir);
+        string to = NormalizePath(ConfigRootFor(newLocation, newCustomDir ?? ""));
+        return !string.Equals(from, to, StringComparison.OrdinalIgnoreCase)
+               && to.StartsWith(from + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>Whether a switch to this location would land somewhere other than the current folder.</summary>
+    public static bool WouldChangeRoamableConfigDir(StorageLocation newLocation, string? newCustomDir)
+        => !string.Equals(
+            NormalizePath(RoamableConfigDir),
+            NormalizePath(ConfigRootFor(newLocation, newCustomDir ?? "")),
+            StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
-    /// Switches the roamable storage mode, moving the roamable Config contents from
-    /// the current folder to the new one. Machine-local data is left untouched. When
-    /// leaving portable mode, the executable-side Config folder is deleted so the next
-    /// startup is not forced back into portable.
+    /// Switches the roamable storage location. With <paramref name="moveFiles"/> the whole
+    /// roamable <c>Config</c> folder is moved to the new root; without it the new location is
+    /// simply used from now on. Machine-local data is never touched. Leaving portable mode
+    /// always deletes the executable-side folder, or the next startup would be forced back
+    /// into portable mode.
     /// </summary>
-    public static void SwitchMode(StorageMode newMode, string? newCustomDir)
+    public static void SwitchLocation(StorageLocation newLocation, string? newCustomDir, bool moveFiles)
     {
-        if (WouldMoveRoamableConfigIntoItself(newMode, newCustomDir))
+        if (WouldMoveRoamableConfigIntoItself(newLocation, newCustomDir))
             throw new InvalidOperationException("The new Config directory cannot be inside the current one.");
 
         string from = RoamableConfigDir;
-        string to = ConfigDirFor(newMode, newCustomDir ?? "");
-        bool leavingPortable = EffectiveMode == StorageMode.Portable && newMode != StorageMode.Portable;
+        string to = ConfigRootFor(newLocation, newCustomDir ?? "");
+        bool leavingPortable = EffectiveLocation == StorageLocation.ProgramDirectory
+                               && newLocation != StorageLocation.ProgramDirectory;
 
-        if (!string.Equals(from, to, StringComparison.OrdinalIgnoreCase))
-        {
+        if (moveFiles)
+            SettingsStorage.MoveConfigRoot(from, to);
+        else
             Directory.CreateDirectory(to);
-            MoveDirectoryContents(from, to);
-        }
 
+        // The executable-side folder is what forces portable mode, so it has to go even
+        // when MoveConfigRoot already emptied it.
         if (leavingPortable)
-        {
-            try { Directory.Delete(PortableConfigDir, recursive: false); }
-            catch { /* Not empty or locked: leave it (stays portable). */ }
-        }
+            Backing.TryDeleteProgramConfig(out _);
 
-        SetMode(newMode, newCustomDir);
+        SetLocation(newLocation, newCustomDir);
     }
 
-    private static void MoveDirectoryContents(string from, string to)
-    {
-        if (!Directory.Exists(from))
-            return;
-
-        Directory.CreateDirectory(to);
-
-        foreach (string src in Directory.EnumerateFiles(from))
-        {
-            string dst = Path.Combine(to, Path.GetFileName(src));
-            try
-            {
-                File.Move(src, dst, overwrite: true);
-            }
-            catch
-            {
-                // A locked file just stays where it is; best effort.
-            }
-        }
-
-        foreach (string srcDir in Directory.EnumerateDirectories(from))
-        {
-            string dstDir = Path.Combine(to, Path.GetFileName(srcDir));
-            MoveDirectoryContents(srcDir, dstDir);
-
-            try { Directory.Delete(srcDir, recursive: false); }
-            catch { /* Not empty or locked: leave it. */ }
-        }
-    }
-
-    private static bool PathsEqual(string left, string right)
-        => string.Equals(NormalizePath(left), NormalizePath(right), StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsSubPathOf(string path, string parent)
-    {
-        string normalizedPath = NormalizePath(path);
-        string normalizedParent = NormalizePath(parent);
-        return normalizedPath.StartsWith(
-            normalizedParent + Path.DirectorySeparatorChar,
-            StringComparison.OrdinalIgnoreCase);
-    }
+    public static void EnsureLocalConfigDir() => Directory.CreateDirectory(LocalConfigDir);
+    public static void EnsureRoamableConfigDir() => Directory.CreateDirectory(RoamableConfigDir);
 
     private static string NormalizePath(string path)
-        => Path.GetFullPath(path)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }
 
 /// <summary>Roamable user preferences: global hotkey, UI language, theme, updates.</summary>
@@ -200,90 +134,196 @@ public sealed class AppSettings
     /// Allowed values: 0 (never), 6, 24 (daily), 168 (weekly).</summary>
     public int UpdateCheckIntervalHours { get; set; } = 24;
 
+    /// <summary>Last state written to disk; the merge base that keeps a concurrent
+    /// instance's edits when this one saves.</summary>
+    private AppSettings? _baseline;
+
     public static AppSettings Load()
     {
-        try
-        {
-            if (File.Exists(Storage.SettingsPath))
-            {
-                var loaded = JsonSerializer.Deserialize<AppSettings>(
-                    File.ReadAllText(Storage.SettingsPath), Storage.JsonOptions);
-                if (loaded is not null)
-                    return loaded;
-            }
-        }
-        catch
-        {
-            // Corrupt file: fall back to defaults below.
-        }
+        bool existed = JsonSettingsFile.TryLoad(Storage.SettingsPath, out AppSettings settings);
+        Normalize(settings);
+        settings._baseline = JsonSettingsFile.Clone(settings);
 
-        var settings = new AppSettings();
-        settings.Save();
+        // Write the defaults out on first run so the file is there to be found and edited.
+        if (!existed)
+            settings.Save(forceAllLocal: true);
+
         return settings;
     }
 
-    public void Save()
+    /// <param name="forceAllLocal">Ignore whatever is already at the target path — used
+    /// right after a storage switch, where the destination is a different folder.</param>
+    public void Save(bool forceAllLocal = false)
     {
-        try
+        Storage.EnsureRoamableConfigDir();
+        if (JsonSettingsFile.TryMergeAndWrite(
+                Storage.SettingsPath, _baseline ?? new AppSettings(), this, Normalize, forceAllLocal, out var merged))
         {
-            Storage.EnsureRoamableConfigDir();
-            File.WriteAllText(Storage.SettingsPath, JsonSerializer.Serialize(this, Storage.JsonOptions));
+            CopyFrom(merged);
+            _baseline = JsonSettingsFile.Clone(merged);
         }
-        catch
-        {
-            // Saving settings is best-effort.
-        }
+    }
+
+    private void CopyFrom(AppSettings other)
+    {
+        Hotkey = other.Hotkey;
+        Language = other.Language;
+        Theme = other.Theme;
+        CheckUpdateOnStartup = other.CheckUpdateOnStartup;
+        UpdateCheckIntervalHours = other.UpdateCheckIntervalHours;
+    }
+
+    private static void Normalize(AppSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.Hotkey))
+            settings.Hotkey = "Alt+Space";
+        if (settings.Language is not ("en" or "zh"))
+            settings.Language = "";
+        if (settings.Theme is not ("Light" or "Dark"))
+            settings.Theme = "";
+        if (settings.UpdateCheckIntervalHours is not (6 or 24 or 168))
+            settings.UpdateCheckIntervalHours = 0;
     }
 }
 
 /// <summary>
-/// Machine-local settings: the storage mode for roamable data, plus machine-specific
+/// Machine-local settings: the storage location for roamable data, plus machine-specific
 /// values (local scan directories). Always stored in local AppData; never roams.
 /// </summary>
 public sealed class LocalSettings
 {
     /// <summary>Where roamable settings are stored.</summary>
-    public StorageMode StorageMode { get; set; } = StorageMode.Default;
+    public StorageLocation StorageLocation { get; set; } = StorageLocation.UserDirectory;
 
-    /// <summary>Root folder for <see cref="Services.StorageMode.Custom"/> (the "Config" child is appended).</summary>
+    /// <summary>Base folder for <see cref="JeekTools.StorageLocation.CustomDirectory"/>
+    /// (the "Config" child is appended).</summary>
     public string CustomStorageDir { get; set; } = "";
 
     /// <summary>Extra local directories to scan in addition to the Start Menu.</summary>
     public List<string> ScanDirectories { get; set; } = new();
 
+    private LocalSettings? _baseline;
+
     public static LocalSettings Load()
     {
+        bool existed = JsonSettingsFile.TryLoad(Storage.LocalSettingsPath, out LocalSettings settings);
+        if (!existed)
+            settings = LoadLegacy();
+
+        Normalize(settings);
+        settings._baseline = JsonSettingsFile.Clone(settings);
+
+        // First run, or a migration from the old LocalSettings.json: persist right away so
+        // the migrated values survive even if the user never opens the settings window.
+        if (!existed)
+            settings.Save();
+
+        return settings;
+    }
+
+    /// <summary>
+    /// Reads the pre-<see cref="SettingsStorage"/> <c>LocalSettings.json</c>, whose storage
+    /// mode was a JeekLauncher-local enum with the same member order. Returning it here is
+    /// enough to migrate: the next <see cref="Save"/> writes the new <c>settings.json</c>.
+    /// </summary>
+    private static LocalSettings LoadLegacy()
+    {
+        var settings = new LocalSettings();
         try
         {
-            if (File.Exists(Storage.LocalSettingsPath))
+            if (!File.Exists(Storage.LegacyLocalSettingsPath))
+                return settings;
+
+            using var document = JsonDocument.Parse(File.ReadAllText(Storage.LegacyLocalSettingsPath));
+            var root = document.RootElement;
+
+            if (root.TryGetProperty("StorageMode", out var mode)
+                && mode.ValueKind == JsonValueKind.String
+                && Enum.TryParse(mode.GetString(), out LegacyStorageMode legacy))
             {
-                var loaded = JsonSerializer.Deserialize<LocalSettings>(
-                    File.ReadAllText(Storage.LocalSettingsPath), Storage.JsonOptions);
-                if (loaded is not null)
-                    return loaded;
+                settings.StorageLocation = legacy switch
+                {
+                    LegacyStorageMode.Portable => StorageLocation.ProgramDirectory,
+                    LegacyStorageMode.Custom => StorageLocation.CustomDirectory,
+                    _ => StorageLocation.UserDirectory,
+                };
+            }
+
+            if (root.TryGetProperty("CustomStorageDir", out var custom) && custom.ValueKind == JsonValueKind.String)
+                settings.CustomStorageDir = custom.GetString() ?? "";
+
+            if (root.TryGetProperty("ScanDirectories", out var dirs) && dirs.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var dir in dirs.EnumerateArray())
+                {
+                    if (dir.ValueKind == JsonValueKind.String && dir.GetString() is { Length: > 0 } path)
+                        settings.ScanDirectories.Add(path);
+                }
             }
         }
         catch
         {
-            // Corrupt file: fall back to defaults below.
+            // Unreadable legacy file: start from defaults.
         }
 
-        var settings = new LocalSettings();
-        settings.Save();
         return settings;
+    }
+
+    private enum LegacyStorageMode
+    {
+        Default,
+        Portable,
+        Custom,
     }
 
     public void Save()
     {
+        Storage.EnsureLocalConfigDir();
+        if (JsonSettingsFile.TryMergeAndWrite(
+                Storage.LocalSettingsPath, _baseline ?? new LocalSettings(), this, Normalize, false, out var merged))
+        {
+            CopyFrom(merged);
+            _baseline = JsonSettingsFile.Clone(merged);
+            TryDeleteLegacyFile();
+        }
+    }
+
+    private static void TryDeleteLegacyFile()
+    {
         try
         {
-            Storage.EnsureLocalConfigDir();
-            File.WriteAllText(Storage.LocalSettingsPath, JsonSerializer.Serialize(this, Storage.JsonOptions));
+            if (File.Exists(Storage.LegacyLocalSettingsPath))
+                File.Delete(Storage.LegacyLocalSettingsPath);
         }
         catch
         {
-            // Saving settings is best-effort.
+            // A leftover legacy file is harmless; the new one is authoritative.
         }
+    }
+
+    private void CopyFrom(LocalSettings other)
+    {
+        StorageLocation = other.StorageLocation;
+        CustomStorageDir = other.CustomStorageDir;
+        ScanDirectories = other.ScanDirectories;
+    }
+
+    private static void Normalize(LocalSettings settings)
+    {
+        settings.StorageLocation = Enum.IsDefined(settings.StorageLocation)
+            ? settings.StorageLocation
+            : StorageLocation.UserDirectory;
+
+        if (settings.StorageLocation == StorageLocation.CustomDirectory
+            && !Path.IsPathFullyQualified(settings.CustomStorageDir))
+        {
+            settings.StorageLocation = StorageLocation.UserDirectory;
+        }
+
+        settings.ScanDirectories = settings.ScanDirectories
+            .Where(dir => !string.IsNullOrWhiteSpace(dir))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 }
 
@@ -309,22 +349,9 @@ public sealed class QuickWordStore
 
     public static QuickWordStore Load()
     {
-        try
-        {
-            if (File.Exists(Storage.QuickWordsPath))
-            {
-                var loaded = JsonSerializer.Deserialize<QuickWordStore>(
-                    File.ReadAllText(Storage.QuickWordsPath), Storage.JsonOptions);
-                if (loaded is not null)
-                    return loaded;
-            }
-        }
-        catch
-        {
-            // Corrupt file: start fresh.
-        }
-
-        return new QuickWordStore();
+        JsonSettingsFile.TryLoad(Storage.QuickWordsPath, out QuickWordStore store);
+        store.Words = new Dictionary<string, string>(store.Words, StringComparer.OrdinalIgnoreCase);
+        return store;
     }
 
     /// <summary>Re-read the words from disk in place (keeps this shared instance valid).</summary>
@@ -335,7 +362,7 @@ public sealed class QuickWordStore
         try
         {
             Storage.EnsureRoamableConfigDir();
-            File.WriteAllText(Storage.QuickWordsPath, JsonSerializer.Serialize(this, Storage.JsonOptions));
+            SharedDataFile.WriteAllTextAtomic(Storage.QuickWordsPath, JsonSettingsFile.Serialize(this));
         }
         catch
         {
@@ -357,22 +384,9 @@ public sealed class UsageStore
 
     public static UsageStore Load()
     {
-        try
-        {
-            if (File.Exists(Storage.UsagePath))
-            {
-                var loaded = JsonSerializer.Deserialize<UsageStore>(
-                    File.ReadAllText(Storage.UsagePath), Storage.JsonOptions);
-                if (loaded is not null)
-                    return loaded;
-            }
-        }
-        catch
-        {
-            // Corrupt file: start fresh.
-        }
-
-        return new UsageStore();
+        JsonSettingsFile.TryLoad(Storage.UsagePath, out UsageStore store);
+        store.Counts = new Dictionary<string, int>(store.Counts, StringComparer.OrdinalIgnoreCase);
+        return store;
     }
 
     public void Save()
@@ -380,7 +394,7 @@ public sealed class UsageStore
         try
         {
             Storage.EnsureLocalConfigDir();
-            File.WriteAllText(Storage.UsagePath, JsonSerializer.Serialize(this, Storage.JsonOptions));
+            SharedDataFile.WriteAllTextAtomic(Storage.UsagePath, JsonSettingsFile.Serialize(this));
         }
         catch
         {

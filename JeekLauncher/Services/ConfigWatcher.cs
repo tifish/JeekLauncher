@@ -40,7 +40,7 @@ internal sealed class ConfigWatcher : IDisposable
         if (_disposed || !Directory.Exists(dir))
             return;
 
-        _settingsPath = Path.GetFullPath(Path.Combine(dir, "Settings.json"));
+        _settingsPath = Path.GetFullPath(Path.Combine(dir, "settings.json"));
         _quickWordsPath = Path.GetFullPath(Path.Combine(dir, "QuickWords.json"));
 
         try
