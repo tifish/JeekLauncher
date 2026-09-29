@@ -103,6 +103,9 @@ public static class DebugMcpContract
         Tool("hotkey_state",
             "Report the configured global hotkey, how it parsed, and whether registration succeeded (another app may hold it).",
             new()),
+        Tool("autostart_state",
+            "Report 'start with Windows': whether the per-user logon task exists, its command/priority/trigger user, and any legacy HKCU Run value.",
+            new()),
         Tool("quick_words",
             "List the remembered 'quick word -> app' bindings and whether each target still exists in the catalog.",
             new() { ["filter"] = Prop("string", "Case-insensitive substring of the quick word.") }));

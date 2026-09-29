@@ -98,6 +98,7 @@ internal static class DebugMcpServer
         host.AddTool("rescan", _ => RescanAsync());
         host.AddTool("config_state", _ => ConfigStateAsync());
         host.AddTool("hotkey_state", _ => HotkeyStateAsync());
+        host.AddTool("autostart_state", _ => Task.Run(() => ToolText(AutoStart.Describe())));
         host.AddTool("quick_words", QuickWordsAsync);
         return host;
     }

@@ -10,7 +10,7 @@
     creates a Start Menu shortcut, enables start-with-Windows, and launches the app.
 
     Nothing is written to the uninstall registry: to remove JeekLauncher, close it and
-    delete the install folder, the Start Menu shortcut, and its HKCU Run value.
+    delete the install folder, the Start Menu shortcut, and its JeekLauncher-<user> scheduled task.
 
     The GitHub API is never called (api.github.com is rate-limited for anonymous users and
     unreachable from mainland China); the fixed releases/latest/download address is used
@@ -187,12 +187,53 @@ function New-StartMenuShortcut {
 }
 
 function Enable-AutoStart {
-    # Same HKCU Run value the app's own "Start with Windows" checkbox writes, so the two
-    # never disagree. No admin rights needed.
-    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-    $target = '"{0}"' -f (Join-Path $InstallDir $ExeName)
-    New-Item -Path $runKey -Force | Out-Null
-    Set-ItemProperty -Path $runKey -Name $AppName -Value $target
+    # Same per-user logon task the app's own "Start with Windows" checkbox writes (see
+    # AutoStart.cs), so the two never disagree. A logon task starts right away, unlike the
+    # HKCU Run key whose entries Explorer runs one at a time. No admin rights needed: the
+    # trigger is limited to this user. The security descriptor keeps the task editable by
+    # the app even if this script ran elevated; priority 4 is normal (the default 7 is not).
+    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $exe = [System.Security.SecurityElement]::Escape((Join-Path $InstallDir $ExeName))
+    $dir = [System.Security.SecurityElement]::Escape($InstallDir)
+    $xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Starts $AppName at logon.</Description>
+    <SecurityDescriptor>D:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;$sid)</SecurityDescriptor>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>$sid</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$sid</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>4</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>$exe</Command>
+      <WorkingDirectory>$dir</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
+    Register-ScheduledTask -TaskName "$AppName-$env:USERNAME" -Xml $xml -Force | Out-Null
+
+    # Drop the Run value older versions used, or the app would be started twice.
+    Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $AppName -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------------------

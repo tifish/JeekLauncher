@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://ghfast.top/h
 
 ## 卸载
 
-退出程序后删除安装目录和开始菜单快捷方式，并移除注册表项 `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\JeekLauncher`。
+先在设置中取消「开机自动启动」（或在任务计划程序中删除 `JeekLauncher-<用户名>` 任务），然后退出程序，删除安装目录和开始菜单快捷方式。
 
 ## 从源码运行
 

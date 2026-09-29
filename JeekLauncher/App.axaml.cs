@@ -127,6 +127,7 @@ public partial class App : Application
             SetUpConfigWatcher();
             SetUpUpdates();
             SetUpDebugMcp(desktop);
+            _ = Task.Run(AutoStart.MigrateLegacyRunValue);
 
             // Realize the native window off-screen so we have a handle for the
             // global hotkey, then hide it until summoned (done in OnWindowFirstOpened).
