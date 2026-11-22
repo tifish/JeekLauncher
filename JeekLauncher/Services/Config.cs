@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json;
+using System.Threading;
 using JeekTools;
 
 namespace JeekLauncher.Services;
@@ -108,6 +110,30 @@ public static class Storage
         SetLocation(newLocation, newCustomDir);
     }
 
+    private static long _lastSettingsSelfWriteTimestamp;
+    private static long _lastQuickWordsSelfWriteTimestamp;
+    private static readonly TimeSpan SelfWriteSuppressionWindow = TimeSpan.FromSeconds(2);
+
+    internal static void MarkSelfWrite(ConfigChangeKind kind)
+    {
+        long now = Stopwatch.GetTimestamp();
+        if (kind.HasFlag(ConfigChangeKind.Settings))
+            Volatile.Write(ref _lastSettingsSelfWriteTimestamp, now);
+        if (kind.HasFlag(ConfigChangeKind.QuickWords))
+            Volatile.Write(ref _lastQuickWordsSelfWriteTimestamp, now);
+    }
+
+    internal static bool IsRecentSelfWrite(ConfigChangeKind kind)
+    {
+        long stamp = kind switch
+        {
+            ConfigChangeKind.Settings => Volatile.Read(ref _lastSettingsSelfWriteTimestamp),
+            ConfigChangeKind.QuickWords => Volatile.Read(ref _lastQuickWordsSelfWriteTimestamp),
+            _ => 0,
+        };
+        return stamp != 0 && Stopwatch.GetElapsedTime(stamp) <= SelfWriteSuppressionWindow;
+    }
+
     public static void EnsureLocalConfigDir() => Directory.CreateDirectory(LocalConfigDir);
     public static void EnsureRoamableConfigDir() => Directory.CreateDirectory(RoamableConfigDir);
 
@@ -156,13 +182,18 @@ public sealed class AppSettings
     public void Save(bool forceAllLocal = false)
     {
         Storage.EnsureRoamableConfigDir();
+        Storage.MarkSelfWrite(ConfigChangeKind.Settings);
         if (JsonSettingsFile.TryMergeAndWrite(
                 Storage.SettingsPath, _baseline ?? new AppSettings(), this, Normalize, forceAllLocal, out var merged))
         {
+            Storage.MarkSelfWrite(ConfigChangeKind.Settings);
             CopyFrom(merged);
             _baseline = JsonSettingsFile.Clone(merged);
         }
     }
+
+    /// <summary>Updates settings values in place while preserving the merge baseline.</summary>
+    public void ApplyFrom(AppSettings other) => CopyFrom(other);
 
     private void CopyFrom(AppSettings other)
     {
@@ -301,6 +332,9 @@ public sealed class LocalSettings
         }
     }
 
+    /// <summary>Updates local settings values in place while preserving the merge baseline.</summary>
+    public void ApplyFrom(LocalSettings other) => CopyFrom(other);
+
     private void CopyFrom(LocalSettings other)
     {
         StorageLocation = other.StorageLocation;
@@ -339,12 +373,15 @@ public sealed class QuickWordStore
     public string? GetTarget(string query)
         => Words.TryGetValue(query, out string? id) ? id : null;
 
-    /// <summary>Remember "query -> id" (no-op for an empty query).</summary>
-    public void Set(string query, string id)
+    /// <summary>Remember "query -> id" (no-op for an empty query). Returns true if stored.</summary>
+    public bool Set(string query, string id)
     {
         string q = query.Trim().ToLowerInvariant();
-        if (q.Length > 0)
-            Words[q] = id;
+        if (q.Length == 0)
+            return false;
+
+        Words[q] = id;
+        return true;
     }
 
     public static QuickWordStore Load()
@@ -362,7 +399,10 @@ public sealed class QuickWordStore
         try
         {
             Storage.EnsureRoamableConfigDir();
+            using var lease = SharedDataFile.Acquire(Storage.QuickWordsPath);
+            Storage.MarkSelfWrite(ConfigChangeKind.QuickWords);
             SharedDataFile.WriteAllTextAtomic(Storage.QuickWordsPath, JsonSettingsFile.Serialize(this));
+            Storage.MarkSelfWrite(ConfigChangeKind.QuickWords);
         }
         catch
         {
@@ -374,13 +414,19 @@ public sealed class QuickWordStore
 /// <summary>Per-item launch counts used to rank items by frequency. Machine-local.</summary>
 public sealed class UsageStore
 {
+    private readonly Dictionary<string, int> _pendingDeltas = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Maps an item id to how many times it has been launched.</summary>
     public Dictionary<string, int> Counts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public int GetCount(string id) => Counts.TryGetValue(id, out int c) ? c : 0;
 
     /// <summary>Record a launch by bumping the item's count.</summary>
-    public void Record(string id) => Counts[id] = GetCount(id) + 1;
+    public void Record(string id)
+    {
+        Counts[id] = GetCount(id) + 1;
+        _pendingDeltas[id] = (_pendingDeltas.TryGetValue(id, out int delta) ? delta : 0) + 1;
+    }
 
     public static UsageStore Load()
     {
@@ -394,7 +440,22 @@ public sealed class UsageStore
         try
         {
             Storage.EnsureLocalConfigDir();
+            using var lease = SharedDataFile.Acquire(Storage.UsagePath);
+            if (_pendingDeltas.Count > 0 && JsonSettingsFile.TryLoad(Storage.UsagePath, out UsageStore disk))
+            {
+                var merged = new Dictionary<string, int>(disk.Counts, StringComparer.OrdinalIgnoreCase);
+                foreach (var (id, delta) in _pendingDeltas)
+                    merged[id] = (merged.TryGetValue(id, out int existing) ? existing : 0) + delta;
+                foreach (var (id, count) in Counts)
+                {
+                    if (!merged.ContainsKey(id))
+                        merged[id] = count;
+                }
+                Counts = merged;
+            }
+
             SharedDataFile.WriteAllTextAtomic(Storage.UsagePath, JsonSettingsFile.Serialize(this));
+            _pendingDeltas.Clear();
         }
         catch
         {

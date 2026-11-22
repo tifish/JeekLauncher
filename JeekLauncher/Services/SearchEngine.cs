@@ -37,13 +37,15 @@ public static class SearchEngine
                 .ToList();
         }
 
+        string normalizedQuery = InitialsHelper.Normalize(query);
         string? learnedId = quickWords.GetTarget(query);
 
         var scored = new List<(AppEntry Entry, long Score)>();
         foreach (var entry in all)
         {
-            int tier = MatchTier(query, entry);
-            bool isLearned = learnedId is not null && entry.Id == learnedId;
+            int tier = MatchTier(normalizedQuery, entry);
+            bool isLearned = learnedId is not null
+                && string.Equals(entry.Id, learnedId, StringComparison.OrdinalIgnoreCase);
             if (tier == 0 && !isLearned)
                 continue;
 
@@ -76,16 +78,18 @@ public static class SearchEngine
                 return 5;
         }
 
-        if (StartsWith(e.SearchName, q) || StartsWith(e.PinyinFull, q))
+        bool distinctPinyin = !ReferenceEquals(e.PinyinFull, e.SearchName);
+
+        if (StartsWith(e.SearchName, q) || (distinctPinyin && StartsWith(e.PinyinFull, q)))
             return 4;
 
         if (initials.Length > 0 && IsSubsequence(q, initials))
             return 3;
 
-        if (Contains(e.SearchName, q) || Contains(e.PinyinFull, q))
+        if (Contains(e.SearchName, q) || (distinctPinyin && Contains(e.PinyinFull, q)))
             return 2;
 
-        if (IsSubsequence(q, e.SearchName) || IsSubsequence(q, e.PinyinFull))
+        if (IsSubsequence(q, e.SearchName) || (distinctPinyin && IsSubsequence(q, e.PinyinFull)))
             return 1;
 
         return 0;
@@ -99,15 +103,15 @@ public static class SearchEngine
 
     private static bool IsSubsequence(string needle, string haystack)
     {
-        if (haystack.Length == 0)
+        if (needle.Length == 0 || haystack.Length < needle.Length)
             return false;
 
         int i = 0;
         foreach (char c in haystack)
         {
-            if (i < needle.Length && c == needle[i])
-                i++;
+            if (c == needle[i] && ++i == needle.Length)
+                return true;
         }
-        return i == needle.Length;
+        return false;
     }
 }

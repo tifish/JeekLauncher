@@ -211,10 +211,13 @@ internal sealed record AdapterOptions(
         }
         else if (registered is not null)
         {
+            var registeredPipe = surface.Equals("debug", StringComparison.OrdinalIgnoreCase)
+                ? registered.DebugPipeName
+                : "";
             pipes =
             [
-                registered.DebugPipeName.Length > 0
-                    ? registered.DebugPipeName
+                registeredPipe.Length > 0
+                    ? registeredPipe
                     : McpPipeNames.Resolve(surface, routeInstance),
             ];
         }
@@ -266,7 +269,7 @@ internal sealed class PipeConnection(AdapterOptions options) : IDisposable
                 {
                     if (line.Length == 0)
                         continue;
-                    if (JsonNode.Parse(line) is JsonObject reply && reply["id"] is null)
+                    if (IsServerNotification(line))
                         continue;
                     return line;
                 }
@@ -339,6 +342,18 @@ internal sealed class PipeConnection(AdapterOptions options) : IDisposable
             WorkingDirectory = Path.GetDirectoryName(options.AppPath) ?? Environment.CurrentDirectory,
             UseShellExecute = true,
         });
+    }
+
+    private static bool IsServerNotification(string line)
+    {
+        try
+        {
+            return JsonNode.Parse(line) is JsonObject reply && reply["id"] is null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void Reset()

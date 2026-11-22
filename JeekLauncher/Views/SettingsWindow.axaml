@@ -30,7 +30,7 @@
                     Padding="10,7"
                     Margin="0,0,0,4">
                 <TextBlock x:Name="ErrorText"
-                           Foreground="#FFCDD2"
+                           Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                            TextWrapping="Wrap"
                            FontSize="12" />
             </Border>

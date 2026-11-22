@@ -31,7 +31,9 @@ try {
     Write-Host "[1/3] Waiting for $appName to exit..."
     Get-Process -Name $appName -ErrorAction SilentlyContinue | ForEach-Object {
         try {
-            $_.WaitForExit()
+            if ($_.Path -and ($_.Path -ieq $exePath)) {
+                $_.WaitForExit()
+            }
         }
         catch {}
     }
@@ -61,7 +63,7 @@ try {
 
     Write-Host "[3/3] Restarting $appName..."
     if (Test-Path -LiteralPath $exePath) {
-        Start-Process -FilePath $exePath
+        Start-Process -FilePath $exePath -WorkingDirectory $installDir
     }
 
     Write-Host ""
@@ -72,7 +74,7 @@ catch {
     Write-Host "Update failed: $($_.Exception.Message)" -ForegroundColor Red
     # Best effort: bring the app back even if the install failed.
     if (Test-Path -LiteralPath $exePath) {
-        Start-Process -FilePath $exePath
+        Start-Process -FilePath $exePath -WorkingDirectory $installDir
     }
     Start-Sleep -Seconds 5
     Exit 1

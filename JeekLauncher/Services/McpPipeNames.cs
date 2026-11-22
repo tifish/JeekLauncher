@@ -36,7 +36,7 @@ public static class McpPipeNames
             : throw new ArgumentException($"Unknown MCP surface '{surface}'.", nameof(surface));
 
     private static string Compose(string baseName, string? instanceId) =>
-        string.IsNullOrWhiteSpace(instanceId) || instanceId == "release"
+        string.IsNullOrWhiteSpace(instanceId) || instanceId.Equals("release", StringComparison.OrdinalIgnoreCase)
             ? baseName
             : $"{baseName}.{instanceId.Trim()}";
 

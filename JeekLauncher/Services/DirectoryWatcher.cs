@@ -15,12 +15,13 @@ internal sealed class DirectoryWatcher : IDisposable
     private readonly List<FileSystemWatcher> _watchers = new();
     private readonly Timer _debounce;
     private readonly Action _onChanged;
+    private readonly object _gate = new();
     private bool _disposed;
 
     public DirectoryWatcher(Action onChanged)
     {
         _onChanged = onChanged;
-        _debounce = new Timer(_ => _onChanged(), null, Timeout.Infinite, Timeout.Infinite);
+        _debounce = new Timer(_ => OnTimer(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
     /// <summary>(Re)start watching the given directories.</summary>
@@ -85,12 +86,32 @@ internal sealed class DirectoryWatcher : IDisposable
 
     private void ScheduleRefresh()
     {
-        if (!_disposed)
-            _debounce.Change(DebounceMs, Timeout.Infinite);
+        lock (_gate)
+        {
+            if (!_disposed)
+                _debounce.Change(DebounceMs, Timeout.Infinite);
+        }
+    }
+
+    private void OnTimer()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+        }
+
+        _onChanged();
     }
 
     private void Stop()
     {
+        lock (_gate)
+        {
+            if (!_disposed)
+                _debounce.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+
         foreach (var watcher in _watchers)
         {
             try
@@ -108,8 +129,14 @@ internal sealed class DirectoryWatcher : IDisposable
 
     public void Dispose()
     {
-        _disposed = true;
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _debounce.Dispose();
+        }
+
         Stop();
-        _debounce.Dispose();
     }
 }

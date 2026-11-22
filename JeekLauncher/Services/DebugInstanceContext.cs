@@ -20,9 +20,10 @@ public static class DebugInstanceContext
         false;
 #endif
 
-    /// <summary>Repository root when running from <c>bin\</c>, otherwise the install folder.</summary>
-    public static string WorkspaceRoot { get; } = Path.GetFullPath(
-        Path.Combine(AppContext.BaseDirectory, ".."));
+    /// <summary>Repository root when running from <c>bin\</c> in Debug, otherwise the install folder.</summary>
+    public static string WorkspaceRoot { get; } = IsDebugBuild
+        ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."))
+        : AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
     public static string InstanceId { get; } = IsDebugBuild
         ? McpPipeNames.InstanceId(AppContext.BaseDirectory)
@@ -58,13 +59,21 @@ public static class DebugInstanceContext
 
     static DebugInstanceContext()
     {
-        var git = ReadGitIdentity(WorkspaceRoot);
-        BranchLabel = git.Branch;
-        CommitLabel = git.Commit;
-        WorktreeLabel = git.Worktree;
-        InstanceLabel = IsDebugBuild
-            ? $"{BranchLabel}@{CommitLabel} / {WorktreeLabel}"
-            : "Release";
+        if (IsDebugBuild)
+        {
+            var git = ReadGitIdentity(WorkspaceRoot);
+            BranchLabel = git.Branch;
+            CommitLabel = git.Commit;
+            WorktreeLabel = git.Worktree;
+            InstanceLabel = $"{BranchLabel}@{CommitLabel} / {WorktreeLabel}";
+        }
+        else
+        {
+            BranchLabel = "";
+            CommitLabel = "";
+            WorktreeLabel = "";
+            InstanceLabel = "Release";
+        }
     }
 
     public static DebugInstanceInfo Info => new(
@@ -117,21 +126,48 @@ public static class DebugInstanceContext
                 : reference;
 
             var refPath = Path.Combine(gitDir, reference.Replace('/', Path.DirectorySeparatorChar));
+            var commonDir = gitDir;
             var commonDirPath = Path.Combine(gitDir, "commondir");
-            if (!File.Exists(refPath) && File.Exists(commonDirPath))
+            if (File.Exists(commonDirPath))
             {
                 var common = File.ReadAllText(commonDirPath).Trim();
-                var commonDir = Path.GetFullPath(Path.Combine(gitDir, common));
-                refPath = Path.Combine(commonDir, reference.Replace('/', Path.DirectorySeparatorChar));
+                commonDir = Path.GetFullPath(Path.Combine(gitDir, common));
+                if (!File.Exists(refPath))
+                    refPath = Path.Combine(commonDir, reference.Replace('/', Path.DirectorySeparatorChar));
             }
 
-            var commit = File.Exists(refPath) ? File.ReadAllText(refPath).Trim() : "unknown";
+            string commit;
+            if (File.Exists(refPath))
+            {
+                commit = File.ReadAllText(refPath).Trim();
+            }
+            else
+            {
+                commit = ReadPackedRef(commonDir, reference) ?? "unknown";
+            }
             return (branch, ShortCommit(commit), worktree);
         }
         catch
         {
             return ("unknown", "unknown", Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar)));
         }
+    }
+
+    private static string? ReadPackedRef(string commonDir, string reference)
+    {
+        var packedPath = Path.Combine(commonDir, "packed-refs");
+        if (!File.Exists(packedPath))
+            return null;
+
+        foreach (var line in File.ReadLines(packedPath))
+        {
+            if (line.Length == 0 || line[0] is '#' or '^')
+                continue;
+            int space = line.IndexOf(' ');
+            if (space > 0 && string.Equals(line[(space + 1)..].Trim(), reference, StringComparison.Ordinal))
+                return line[..space].Trim();
+        }
+        return null;
     }
 
     private static string ShortCommit(string value) => value.Length >= 7 ? value[..7] : value;

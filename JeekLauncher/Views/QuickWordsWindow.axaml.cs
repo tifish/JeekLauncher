@@ -67,20 +67,27 @@ public partial class QuickWordsWindow : Window
             return;
 
         var entries = _entriesProvider?.Invoke();
+        AppBox.ItemsSource = entries;
+
+        var byId = new Dictionary<string, AppEntry>(StringComparer.OrdinalIgnoreCase);
+        if (entries is not null)
+        {
+            foreach (var entry in entries)
+                byId.TryAdd(entry.Id, entry);
+        }
 
         _rows.Clear();
         foreach (var pair in _quickWords.Words.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
         {
             string path = pair.Value;
-            string? liveName = entries?
-                .FirstOrDefault(e => string.Equals(e.Id, path, StringComparison.OrdinalIgnoreCase))?.Name;
+            byId.TryGetValue(path, out var liveEntry);
 
             _rows.Add(new QuickWordRow
             {
                 Word = pair.Key,
-                TargetName = liveName ?? SafeName(path),
+                TargetName = liveEntry?.Name ?? SafeName(path),
                 TargetPath = path,
-                Exists = SafeExists(path),
+                Exists = liveEntry is not null || SafeExists(path),
             });
         }
     }

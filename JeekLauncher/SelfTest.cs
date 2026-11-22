@@ -7,7 +7,7 @@ using JeekLauncher.Services;
 namespace JeekLauncher;
 
 /// <summary>
-/// Headless diagnostics (JeekLauncher.exe --selftest [all|search|watch|autostart]).
+/// Headless diagnostics (JeekLauncher.exe --selftest [all|search|watch|autostart|lang]).
 /// Exercises the real services without starting the GUI and writes a report to
 /// <c>%TEMP%\jeek-selftest.txt</c>.
 /// </summary>
@@ -55,7 +55,7 @@ internal static class SelfTest
         Line();
 
         Line("== Chinese-named entries  (name -> initials) ==");
-        foreach (var e in entries.Where(e => HasCjk(e.Name)).Take(20))
+        foreach (var e in entries.Where(e => InitialsHelper.HasCjk(e.Name)).Take(20))
             Line($"   {e.Name}  ->  [{e.Initials}]");
         Line();
 
@@ -129,18 +129,33 @@ internal static class SelfTest
     private static string BuildAutoStartReport()
     {
         var report = new StringBuilder();
+        bool liveEnabled = AutoStart.IsEnabled();
+        string testTask = $"JeekLauncher-SelfTest-{Environment.ProcessId}";
+        string exe = Environment.ProcessPath ?? "";
 
-        bool before = AutoStart.IsEnabled();
-        AutoStart.SetEnabled(true);
-        bool afterOn = AutoStart.IsEnabled();
-        AutoStart.SetEnabled(false);
-        bool afterOff = AutoStart.IsEnabled();
+        bool created = false;
+        bool afterOn = false;
+        bool afterOff = false;
+        try
+        {
+            created = !string.IsNullOrEmpty(exe) && AutoStart.RegisterTask(exe, testTask);
+            afterOn = AutoStart.TaskExists(testTask);
+            AutoStart.DeleteTask(testTask);
+            afterOff = AutoStart.TaskExists(testTask);
+        }
+        finally
+        {
+            if (AutoStart.TaskExists(testTask))
+                AutoStart.DeleteTask(testTask);
+        }
 
-        report.AppendLine($"initial   : {before}");
-        report.AppendLine($"after on  : {afterOn}   (expect True)");
-        report.AppendLine($"after off : {afterOff}  (expect False)");
+        report.AppendLine($"live autostart : {liveEnabled}  (untouched)");
+        report.AppendLine($"test task      : {testTask}");
+        report.AppendLine($"register ok    : {created}   (expect True)");
+        report.AppendLine($"after on       : {afterOn}   (expect True)");
+        report.AppendLine($"after off      : {afterOff}  (expect False)");
         report.AppendLine();
-        report.AppendLine(afterOn && !afterOff ? "RESULT: PASS" : "RESULT: FAIL");
+        report.AppendLine(created && afterOn && !afterOff ? "RESULT: PASS" : "RESULT: FAIL");
 
         return report.ToString().TrimEnd();
     }
@@ -174,15 +189,5 @@ internal static class SelfTest
         report.AppendLine(pass ? "RESULT: PASS" : "RESULT: FAIL");
 
         return report.ToString().TrimEnd();
-    }
-
-    private static bool HasCjk(string s)
-    {
-        foreach (char c in s)
-        {
-            if (c is >= '一' and <= '鿿')
-                return true;
-        }
-        return false;
     }
 }

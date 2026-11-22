@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Jeek.Avalonia.Localization;
 using JeekLauncher.Services;
@@ -15,9 +16,12 @@ namespace JeekLauncher.Views;
 public partial class SettingsWindow : Window
 {
     private readonly ObservableCollection<string> _dirs = new();
+    private readonly Func<string, bool>? _canRegisterHotkey;
     private readonly Func<AppSettings, LocalSettings, bool>? _onSave;
     private readonly Action<StorageLocation, string, bool>? _onStorageLocationChange;
     private readonly Action? _onCheckUpdates;
+    private bool? _initialAutoStart;
+    private bool _autoStartUserToggled;
 
     public SettingsWindow()
     {
@@ -28,15 +32,18 @@ public partial class SettingsWindow : Window
     /// <param name="local">Current machine-local settings (scan directories).</param>
     /// <param name="location">The storage location currently in effect.</param>
     /// <param name="customDir">The custom storage root (for <see cref="StorageLocation.CustomDirectory"/>).</param>
+    /// <param name="canRegisterHotkey">Checks whether a hotkey can be registered before applying other changes.</param>
     /// <param name="onSave">Applies the settings; returns whether the hotkey registered.</param>
     /// <param name="onStorageLocationChange">Switches storage location; the flag says whether to
     /// move the existing roamable config files along.</param>
     public SettingsWindow(AppSettings settings, LocalSettings local,
         StorageLocation location, string customDir,
+        Func<string, bool> canRegisterHotkey,
         Func<AppSettings, LocalSettings, bool> onSave,
         Action<StorageLocation, string, bool> onStorageLocationChange,
         Action onCheckUpdates) : this()
     {
+        _canRegisterHotkey = canRegisterHotkey;
         _onSave = onSave;
         _onStorageLocationChange = onStorageLocationChange;
         _onCheckUpdates = onCheckUpdates;
@@ -45,44 +52,33 @@ public partial class SettingsWindow : Window
         // Capture the shortcut directly instead of letting the user type it. Tunnel so
         // we see the keys before the (read-only) TextBox does.
         HotkeyBox.AddHandler(KeyDownEvent, OnHotkeyKeyDown, RoutingStrategies.Tunnel);
-        StartupCheck.IsChecked = AutoStart.IsEnabled();
 
-        // Language picker: index 0 = follow system, then "en", "zh".
-        LanguageBox.ItemsSource = new[] { Localizer.Get("FollowSystem"), "English", "中文" };
-        LanguageBox.SelectedIndex = settings.Language switch { "en" => 1, "zh" => 2, _ => 0 };
-
-        // Theme picker: index 0 = follow system, then Light, Dark.
-        ThemeBox.ItemsSource = new[] { Localizer.Get("FollowSystem"), Localizer.Get("ThemeLight"), Localizer.Get("ThemeDark") };
-        ThemeBox.SelectedIndex = settings.Theme switch { "Light" => 1, "Dark" => 2, _ => 0 };
-
-        // Updates section: version label + check-on-startup + interval + actions.
-        VersionText.Text = $"{Localizer.Get("Version")}: " +
-            (AutoUpdateService.IsDevBuild ? Localizer.Get("DevBuild") : AutoUpdateService.GetLocalCommitCount().ToString());
-        UpdateStartupCheck.IsChecked = settings.CheckUpdateOnStartup;
-        UpdateIntervalBox.ItemsSource = new[]
+        // Query Task Scheduler off the UI thread so opening Settings stays instant.
+        StartupCheck.IsEnabled = false;
+        StartupCheck.IsCheckedChanged += (_, _) =>
         {
-            Localizer.Get("UpdateIntervalNone"),
-            Localizer.Get("UpdateInterval6h"),
-            Localizer.Get("UpdateIntervalDaily"),
-            Localizer.Get("UpdateIntervalWeekly"),
+            if (StartupCheck.IsEnabled)
+                _autoStartUserToggled = true;
         };
-        UpdateIntervalBox.SelectedIndex = settings.UpdateCheckIntervalHours switch { 6 => 1, 24 => 2, 168 => 3, _ => 0 };
+        _ = LoadAutoStartStateAsync();
+
+        // Populate code-built localized items and keep them in sync on language switches.
+        PopulateLocalizedChoices(
+            settings.Language switch { "en" => 1, "zh" => 2, _ => 0 },
+            settings.Theme switch { "Light" => 1, "Dark" => 2, _ => 0 },
+            settings.UpdateCheckIntervalHours switch { 6 => 1, 24 => 2, 168 => 3, _ => 0 },
+            (int)location);
+        UpdateStartupCheck.IsChecked = settings.CheckUpdateOnStartup;
         CheckUpdatesButton.Click += (_, _) => _onCheckUpdates?.Invoke();
         HomepageButton.Click += (_, _) => OpenHomepage();
 
-        // Storage location picker: index matches StorageLocation
-        // (UserDirectory, ProgramDirectory, CustomDirectory).
-        StorageModeBox.ItemsSource = new[]
-        {
-            Localizer.Get("StorageModeDefault"),
-            Localizer.Get("StorageModePortable"),
-            Localizer.Get("StorageModeCustom"),
-        };
-        StorageModeBox.SelectedIndex = (int)location;
         CustomDirBox.Text = customDir;
         UpdateCustomDirVisibility();
         StorageModeBox.SelectionChanged += (_, _) => UpdateCustomDirVisibility();
         BrowseCustomDirButton.Click += OnBrowseCustomDir;
+
+        Localizer.LanguageChanged += OnLanguageChanged;
+        Closed += (_, _) => Localizer.LanguageChanged -= OnLanguageChanged;
 
         foreach (string dir in local.ScanDirectories)
             _dirs.Add(dir);
@@ -98,6 +94,56 @@ public partial class SettingsWindow : Window
         OpenDirItem.Click += (_, _) => OpenSelectedDirectory();
         RemoveDirItem.Click += OnRemoveDirectory;
         DirsList.DoubleTapped += (_, _) => OpenSelectedDirectory();
+    }
+
+    private async Task LoadAutoStartStateAsync()
+    {
+        bool enabled = await Task.Run(AutoStart.IsEnabled);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _initialAutoStart = enabled;
+            if (!_autoStartUserToggled)
+                StartupCheck.IsChecked = enabled;
+            StartupCheck.IsEnabled = true;
+        });
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        PopulateLocalizedChoices(
+            LanguageBox.SelectedIndex,
+            ThemeBox.SelectedIndex,
+            UpdateIntervalBox.SelectedIndex,
+            StorageModeBox.SelectedIndex);
+    }
+
+    private void PopulateLocalizedChoices(int langIndex, int themeIndex, int intervalIndex, int storageIndex)
+    {
+        LanguageBox.ItemsSource = new[] { Localizer.Get("FollowSystem"), "English", "中文" };
+        LanguageBox.SelectedIndex = langIndex >= 0 ? langIndex : 0;
+
+        ThemeBox.ItemsSource = new[] { Localizer.Get("FollowSystem"), Localizer.Get("ThemeLight"), Localizer.Get("ThemeDark") };
+        ThemeBox.SelectedIndex = themeIndex >= 0 ? themeIndex : 0;
+
+        VersionText.Text = $"{Localizer.Get("Version")}: " +
+            (AutoUpdateService.IsDevBuild ? Localizer.Get("DevBuild") : AutoUpdateService.GetLocalCommitCount().ToString());
+
+        UpdateIntervalBox.ItemsSource = new[]
+        {
+            Localizer.Get("UpdateIntervalNone"),
+            Localizer.Get("UpdateInterval6h"),
+            Localizer.Get("UpdateIntervalDaily"),
+            Localizer.Get("UpdateIntervalWeekly"),
+        };
+        UpdateIntervalBox.SelectedIndex = intervalIndex >= 0 ? intervalIndex : 0;
+
+        StorageModeBox.ItemsSource = new[]
+        {
+            Localizer.Get("StorageModeDefault"),
+            Localizer.Get("StorageModePortable"),
+            Localizer.Get("StorageModeCustom"),
+        };
+        StorageModeBox.SelectedIndex = storageIndex >= 0 ? storageIndex : 0;
     }
 
     /// <summary>
@@ -127,6 +173,7 @@ public partial class SettingsWindow : Window
         parts.Add(token);
 
         HotkeyBox.Text = string.Join("+", parts);
+        ErrorBanner.IsVisible = false;
         e.Handled = true; // swallow so the combo doesn't also act on the box
     }
 
@@ -144,6 +191,7 @@ public partial class SettingsWindow : Window
         >= Key.F1 and <= Key.F24 => key.ToString(),
         Key.Space => "Space",
         Key.Enter => "Enter",
+        Key.Tab => "Tab",
         Key.OemTilde => "`",
         _ => null,
     };
@@ -225,9 +273,13 @@ public partial class SettingsWindow : Window
 
     private async void OnSave(object? sender, RoutedEventArgs e)
     {
+        ErrorBanner.IsVisible = false;
+
         string hotkey = string.IsNullOrWhiteSpace(HotkeyBox.Text) ? "Alt+Space" : HotkeyBox.Text.Trim();
 
-        var location = (StorageLocation)StorageModeBox.SelectedIndex;
+        var location = StorageModeBox.SelectedIndex >= 0
+            ? (StorageLocation)StorageModeBox.SelectedIndex
+            : StorageLocation.UserDirectory;
         string customDir = (CustomDirBox.Text ?? string.Empty).Trim();
         if (location == StorageLocation.CustomDirectory &&
             (!Path.IsPathFullyQualified(customDir) ||
@@ -237,10 +289,15 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        // Verify hotkey availability before prompting to move config files or toggling autostart.
+        if (_canRegisterHotkey is not null && !_canRegisterHotkey(hotkey))
+        {
+            ShowHotkeyError(hotkey);
+            return;
+        }
+
         if (!await TryApplyStorageLocationAsync(location, customDir))
             return; // cancelled or invalid — keep the window open
-
-        AutoStart.SetEnabled(StartupCheck.IsChecked == true);
 
         var settings = new AppSettings
         {
@@ -260,9 +317,16 @@ public partial class SettingsWindow : Window
 
         bool hotkeyOk = _onSave?.Invoke(settings, local) ?? true;
         if (hotkeyOk)
+        {
+            bool desiredAutoStart = StartupCheck.IsChecked == true;
+            if (StartupCheck.IsEnabled && (_autoStartUserToggled || _initialAutoStart != desiredAutoStart))
+                _ = Task.Run(() => AutoStart.SetEnabled(desiredAutoStart));
             Close();
+        }
         else
+        {
             ShowHotkeyError(hotkey); // keep the window open so the user can fix it
+        }
     }
 
     /// <summary>
@@ -288,7 +352,7 @@ public partial class SettingsWindow : Window
             // Not a choice: the portable folder is removed on the way out.
             if (!await MessageDialog.ShowConfirmAsync(title,
                     string.Format(Localizer.Get("MoveConfigRequired"), from, to),
-                    Localizer.Get("MoveConfigMove"), Localizer.Get("Cancel")))
+                    Localizer.Get("MoveConfigMove"), Localizer.Get("Cancel"), Icon))
             {
                 return false;
             }
@@ -297,9 +361,13 @@ public partial class SettingsWindow : Window
         }
         else
         {
-            moveFiles = await MessageDialog.ShowConfirmAsync(title,
+            bool? choice = await MessageDialog.ShowChoiceAsync(title,
                 string.Format(Localizer.Get("MoveConfigQuestion"), from, to),
-                Localizer.Get("MoveConfigMove"), Localizer.Get("MoveConfigKeep"));
+                Localizer.Get("MoveConfigMove"), Localizer.Get("MoveConfigKeep"), Localizer.Get("Cancel"), Icon);
+            if (choice is null)
+                return false;
+
+            moveFiles = choice.Value;
         }
 
         try

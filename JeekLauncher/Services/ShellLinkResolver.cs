@@ -4,28 +4,45 @@ using System.Text;
 
 namespace JeekLauncher.Services;
 
-/// <summary>Resolves the target path of a Windows <c>.lnk</c> shortcut via COM.</summary>
+/// <summary>Resolved target path and launch arguments of a Windows <c>.lnk</c> shortcut.</summary>
+internal readonly record struct ShellLinkInfo(string? Target, string? Arguments);
+
+/// <summary>Resolves the target path and arguments of a Windows <c>.lnk</c> shortcut via COM.</summary>
 internal static class ShellLinkResolver
 {
     private const uint SlgpRawPath = 0x4;
 
-    public static string? Resolve(string lnkPath)
+    public static string? Resolve(string lnkPath) => ResolveInfo(lnkPath).Target;
+
+    public static ShellLinkInfo ResolveInfo(string lnkPath)
     {
+        IShellLinkW? link = null;
         try
         {
-            var link = (IShellLinkW)new ShellLink();
+            link = (IShellLinkW)new ShellLink();
             ((IPersistFile)link).Load(lnkPath, 0);
 
-            var builder = new StringBuilder(260);
+            var pathBuilder = new StringBuilder(1024);
             var data = new WIN32_FIND_DATAW();
-            link.GetPath(builder, builder.Capacity, ref data, SlgpRawPath);
+            link.GetPath(pathBuilder, pathBuilder.Capacity, ref data, SlgpRawPath);
+            string path = pathBuilder.ToString();
 
-            string path = builder.ToString();
-            return string.IsNullOrWhiteSpace(path) ? null : path;
+            var argsBuilder = new StringBuilder(1024);
+            link.GetArguments(argsBuilder, argsBuilder.Capacity);
+            string args = argsBuilder.ToString().Trim();
+
+            return new ShellLinkInfo(
+                string.IsNullOrWhiteSpace(path) ? null : path,
+                args.Length == 0 ? null : args);
         }
         catch
         {
-            return null;
+            return default;
+        }
+        finally
+        {
+            if (link is not null)
+                Marshal.ReleaseComObject(link);
         }
     }
 

@@ -23,6 +23,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem Include version-controlled runtime files from bin\ (not copied by csproj) and strip PDBs.
+xcopy /E /I /Y "%~dp0bin\Data" "%OUT%\Data" >nul
+copy /Y "%~dp0bin\AutoUpdate.ps1" "%OUT%\" >nul
+copy /Y "%~dp0bin\Setup.cmd" "%OUT%\" >nul
+copy /Y "%~dp0bin\dotnet-install.ps1" "%OUT%\" >nul
+del /S /Q "%OUT%\*.pdb" >nul 2>&1
+
 echo.
 echo Published -^> "%OUT%"
 echo   Executable : %OUT%\JeekLauncher.exe

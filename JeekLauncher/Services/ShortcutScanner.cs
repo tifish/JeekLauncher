@@ -48,6 +48,7 @@ public static class ShortcutScanner
         var entries = new List<AppEntry>();
         var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var activeIconKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 1) .lnk / .url shortcuts from the Start Menu + custom directories.
         foreach (string dir in GetDirectories(customDirectories))
@@ -59,18 +60,13 @@ public static class ShortcutScanner
             {
                 try
                 {
-                    var entry = BuildEntry(file);
+                    var entry = BuildEntry(file, seenTargets);
                     if (entry is null)
-                        continue;
-
-                    // De-duplicate by resolved target (the same app can have a
-                    // shortcut in both the all-users and current-user Start Menu).
-                    string key = (entry.Target ?? entry.Path).ToLowerInvariant();
-                    if (!seenTargets.Add(key))
                         continue;
 
                     entries.Add(entry);
                     seenNames.Add(entry.Name);
+                    activeIconKeys.Add(entry.Path);
                 }
                 catch
                 {
@@ -90,7 +86,9 @@ public static class ShortcutScanner
                     if (IsNoiseName(name) || !seenNames.Add(name))
                         continue;
 
-                    entries.Add(BuildPackagedEntry(name, aumid));
+                    var entry = BuildPackagedEntry(name, aumid);
+                    entries.Add(entry);
+                    activeIconKeys.Add(entry.Path);
                 }
                 catch
                 {
@@ -99,6 +97,7 @@ public static class ShortcutScanner
             }
         }
 
+        IconLoader.PruneCache(activeIconKeys);
         return entries;
     }
 
@@ -115,27 +114,39 @@ public static class ShortcutScanner
             Target = null,
             Initials = InitialsHelper.Compute(name),
             SearchName = searchName,
-            PinyinFull = HasCjk(name) ? PinyinHelper.GetFullPinyin(name) : searchName,
+            PinyinFull = InitialsHelper.HasCjk(name) ? PinyinHelper.GetFullPinyin(name) : searchName,
             Icon = IconLoader.LoadShellIcon(parsingName),
         };
     }
 
-    private static AppEntry? BuildEntry(string file)
+    private static AppEntry? BuildEntry(string file, HashSet<string> seenTargets)
     {
         string name = Path.GetFileNameWithoutExtension(file);
         if (string.IsNullOrWhiteSpace(name) || IsNoiseName(name))
             return null;
 
         string extension = Path.GetExtension(file);
-        string? target = extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase)
-            ? ShellLinkResolver.Resolve(file)
-            : null;
+        ShellLinkInfo linkInfo = extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase)
+            ? ShellLinkResolver.ResolveInfo(file)
+            : default;
+        string? target = linkInfo.Target;
 
         if (target is not null && IsNoiseTarget(target))
             return null;
 
+        // De-duplicate by resolved (target, arguments) before extracting icons or computing pinyin:
+        // identical shortcuts across all-users + current-user Start Menu merge, while shortcuts
+        // targeting the same host exe with distinct arguments (e.g. PWAs, dev prompts) stay separate.
+        string dedupKey = target is null
+            ? file
+            : linkInfo.Arguments is { Length: > 0 } args
+                ? $"{target}\0{args}"
+                : target;
+        if (!seenTargets.Add(dedupKey))
+            return null;
+
         string searchName = InitialsHelper.Normalize(name);
-        string pinyinFull = HasCjk(name) ? PinyinHelper.GetFullPinyin(name) : searchName;
+        string pinyinFull = InitialsHelper.HasCjk(name) ? PinyinHelper.GetFullPinyin(name) : searchName;
 
         return new AppEntry
         {
@@ -149,20 +160,12 @@ public static class ShortcutScanner
         };
     }
 
-    private static bool HasCjk(string s)
-    {
-        foreach (char c in s)
-        {
-            if (c is >= '一' and <= '鿿' or >= '㐀' and <= '䶿')
-                return true;
-        }
-        return false;
-    }
-
     private static IEnumerable<string> EnumerateShortcuts(string root)
     {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var stack = new Stack<string>();
-        stack.Push(root);
+        if (visited.Add(CanonicalDir(root)))
+            stack.Push(root);
 
         while (stack.Count > 0)
         {
@@ -172,7 +175,10 @@ public static class ShortcutScanner
             try { subdirectories = Directory.GetDirectories(current); }
             catch { subdirectories = Array.Empty<string>(); }
             foreach (string sub in subdirectories)
-                stack.Push(sub);
+            {
+                if (visited.Add(CanonicalDir(sub)))
+                    stack.Push(sub);
+            }
 
             string[] files;
             try { files = Directory.GetFiles(current); }
@@ -187,6 +193,21 @@ public static class ShortcutScanner
                     yield return file;
                 }
             }
+        }
+    }
+
+    private static string CanonicalDir(string path)
+    {
+        try
+        {
+            var resolved = Directory.ResolveLinkTarget(path, returnFinalTarget: true);
+            return Path.GetFullPath(resolved?.FullName ?? path)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return Path.GetFullPath(path)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
     }
 

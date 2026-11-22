@@ -2,8 +2,8 @@
 
 - After finishing a feature or fixing a bug:
   - Add any interface it needs for testing to the debug MCP interface.
-  - Automatically build and launch the program **as Debug** (e.g. `Run.cmd`, or `dotnet build` without `-c Release`). The debug MCP only listens in Debug builds.
-    - Do **not** use root `Build.cmd` for this loop: it is the **Release** ship script (cleans `bin`, strips PDBs). Use it for packaging, not for feature testing.
+  - Automatically build and launch the program **as Debug** (e.g. `Run.cmd`, `Build.cmd`, or `dotnet build` without `-c Release`). The debug MCP only listens in Debug builds.
+    - Do **not** use `Publish.cmd` or `-c Release` for this loop: `Publish.cmd` builds a Release package into `publish\` (strips PDBs, skips the Debug MCP adapter). Use it for packaging, not for feature testing.
     - If the program from the current worktree is already running, kill only the process whose executable path matches this worktree, then run it again. Leave instances from other worktrees running.
   - Use the current worktree's debug MCP (`JeekLauncherDebugMcp.cmd` at the repo root) to test the feature or bug; if anything is wrong, fix it and test again until it passes.
 - When reading code, logs, and the debug MCP are not enough to locate a problem, use a debugger:

@@ -1,9 +1,9 @@
-using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Jeek.Avalonia.Localization;
 using JeekLauncher.Models;
 using JeekLauncher.Services;
+using JeekTools;
 
 namespace JeekLauncher.ViewModels;
 
@@ -22,7 +22,7 @@ public sealed class LauncherViewModel : INotifyPropertyChanged
         _quickWords = quickWords;
     }
 
-    public ObservableCollection<AppEntry> Results { get; } = new();
+    public FastObservableCollection<AppEntry> Results { get; } = new();
 
     public string Query
     {
@@ -71,17 +71,19 @@ public sealed class LauncherViewModel : INotifyPropertyChanged
     /// <summary>Reset for a fresh appearance of the window.</summary>
     public void Reset()
     {
-        Query = string.Empty;
+        if (_query.Length > 0)
+        {
+            _query = string.Empty;
+            OnPropertyChanged(nameof(Query));
+        }
+
         Refresh();
     }
 
     public void Refresh()
     {
         var matches = SearchEngine.Search(_query, _all, _usage, _quickWords);
-
-        Results.Clear();
-        foreach (var entry in matches)
-            Results.Add(entry);
+        Results.Replace(matches);
 
         SelectedIndex = Results.Count > 0 ? 0 : -1;
 

@@ -15,12 +15,51 @@
         Topmost="True"
         WindowStartupLocation="Manual">
 
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="LauncherCardBackground" Color="#F01D1E22" />
+                    <SolidColorBrush x:Key="LauncherCardBorder" Color="#2EFFFFFF" />
+                    <BoxShadows x:Key="LauncherCardShadow">0 10 34 0 #80000000</BoxShadows>
+                    <SolidColorBrush x:Key="LauncherDividerBackground" Color="#1AFFFFFF" />
+                    <SolidColorBrush x:Key="LauncherStatusBarBackground" Color="#12FFFFFF" />
+                    <SolidColorBrush x:Key="LauncherPrimaryForeground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="LauncherSecondaryForeground" Color="#A0FFFFFF" />
+                    <SolidColorBrush x:Key="LauncherSubtitleForeground" Color="#80FFFFFF" />
+                    <SolidColorBrush x:Key="LauncherBadgeBackground" Color="#16FFFFFF" />
+                    <SolidColorBrush x:Key="LauncherBadgeForeground" Color="#90FFFFFF" />
+                    <SolidColorBrush x:Key="LauncherButtonBackground" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="LauncherButtonForeground" Color="#E0FFFFFF" />
+                    <SolidColorBrush x:Key="LauncherEditorBackground" Color="#22000000" />
+                    <SolidColorBrush x:Key="LauncherPromptForeground" Color="#C0FFFFFF" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="LauncherCardBackground" Color="#F5F6F7F9" />
+                    <SolidColorBrush x:Key="LauncherCardBorder" Color="#26000000" />
+                    <BoxShadows x:Key="LauncherCardShadow">0 10 30 0 #38000000</BoxShadows>
+                    <SolidColorBrush x:Key="LauncherDividerBackground" Color="#18000000" />
+                    <SolidColorBrush x:Key="LauncherStatusBarBackground" Color="#0C000000" />
+                    <SolidColorBrush x:Key="LauncherPrimaryForeground" Color="#E6000000" />
+                    <SolidColorBrush x:Key="LauncherSecondaryForeground" Color="#99000000" />
+                    <SolidColorBrush x:Key="LauncherSubtitleForeground" Color="#78000000" />
+                    <SolidColorBrush x:Key="LauncherBadgeBackground" Color="#12000000" />
+                    <SolidColorBrush x:Key="LauncherBadgeForeground" Color="#88000000" />
+                    <SolidColorBrush x:Key="LauncherButtonBackground" Color="#14000000" />
+                    <SolidColorBrush x:Key="LauncherButtonForeground" Color="#D9000000" />
+                    <SolidColorBrush x:Key="LauncherEditorBackground" Color="#0F000000" />
+                    <SolidColorBrush x:Key="LauncherPromptForeground" Color="#B3000000" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
     <Border Margin="14"
             CornerRadius="14"
-            Background="#F01D1E22"
-            BorderBrush="#2EFFFFFF"
+            Background="{DynamicResource LauncherCardBackground}"
+            BorderBrush="{DynamicResource LauncherCardBorder}"
             BorderThickness="1"
-            BoxShadow="0 10 34 0 #80000000">
+            BoxShadow="{DynamicResource LauncherCardShadow}">
         <DockPanel>
 
             <!-- Search box -->
@@ -32,18 +71,29 @@
                          Padding="0"
                          BorderThickness="0"
                          Background="Transparent"
-                         VerticalContentAlignment="Center" />
+                         VerticalContentAlignment="Center">
+                    <TextBox.Styles>
+                        <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="0" />
+                        </Style>
+                        <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="0" />
+                        </Style>
+                    </TextBox.Styles>
+                </TextBox>
             </Border>
 
-            <Border DockPanel.Dock="Top" Height="1" Background="#1AFFFFFF" />
+            <Border DockPanel.Dock="Top" Height="1" Background="{DynamicResource LauncherDividerBackground}" />
 
             <!-- Status bar -->
-            <Border DockPanel.Dock="Bottom" Padding="18,7" Background="#12FFFFFF">
+            <Border DockPanel.Dock="Bottom" Padding="18,7" Background="{DynamicResource LauncherStatusBarBackground}">
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Grid.Column="0"
                                Text="{Binding StatusText}"
                                FontSize="11"
-                               Foreground="#A0FFFFFF"
+                               Foreground="{DynamicResource LauncherSecondaryForeground}"
                                VerticalAlignment="Center" />
                     <Button Grid.Column="1"
                             x:Name="SetQuickWordButton"
@@ -51,8 +101,8 @@
                             FontSize="11"
                             Padding="9,2"
                             VerticalAlignment="Center"
-                            Background="#22FFFFFF"
-                            Foreground="#E0FFFFFF"
+                            Background="{DynamicResource LauncherButtonBackground}"
+                            Foreground="{DynamicResource LauncherButtonForeground}"
                             BorderThickness="0"
                             CornerRadius="5" />
                 </Grid>
@@ -63,11 +113,11 @@
                     DockPanel.Dock="Bottom"
                     IsVisible="False"
                     Padding="18,10"
-                    Background="#22000000">
+                    Background="{DynamicResource LauncherEditorBackground}">
                 <StackPanel Spacing="6">
                     <TextBlock x:Name="QuickWordPrompt"
                                FontSize="11"
-                               Foreground="#C0FFFFFF"
+                               Foreground="{DynamicResource LauncherPromptForeground}"
                                TextTrimming="CharacterEllipsis" />
                     <TextBox x:Name="QuickWordBox"
                              FontSize="15"
@@ -102,11 +152,11 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                                 <TextBlock Text="{Binding Name}"
                                            FontSize="15"
-                                           Foreground="#FFFFFFFF"
+                                           Foreground="{DynamicResource LauncherPrimaryForeground}"
                                            TextTrimming="CharacterEllipsis" />
                                 <TextBlock Text="{Binding Subtitle}"
                                            FontSize="11"
-                                           Foreground="#80FFFFFF"
+                                           Foreground="{DynamicResource LauncherSubtitleForeground}"
                                            TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                             <Border Grid.Column="2"
@@ -114,10 +164,10 @@
                                     Margin="8,0,2,0"
                                     Padding="7,2"
                                     CornerRadius="5"
-                                    Background="#16FFFFFF">
+                                    Background="{DynamicResource LauncherBadgeBackground}">
                                 <TextBlock Text="{Binding Initials}"
                                            FontSize="11"
-                                           Foreground="#90FFFFFF" />
+                                           Foreground="{DynamicResource LauncherBadgeForeground}" />
                             </Border>
                         </Grid>
                     </DataTemplate>

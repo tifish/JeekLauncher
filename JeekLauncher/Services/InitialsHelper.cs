@@ -77,7 +77,17 @@ public static class InitialsHelper
     private static bool IsLatinOrDigit(char c)
         => c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9';
 
-    private static bool IsCjk(char c)
+    public static bool IsCjk(char c)
         => c is >= '一' and <= '鿿' // CJK Unified Ideographs (U+4E00–U+9FFF)
             or >= '㐀' and <= '䶿'; // CJK Extension A (U+3400–U+4DBF)
+
+    public static bool HasCjk(string s)
+    {
+        foreach (char c in s)
+        {
+            if (IsCjk(c))
+                return true;
+        }
+        return false;
+    }
 }

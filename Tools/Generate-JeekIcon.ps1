@@ -1,11 +1,11 @@
-param()
+﻿param()
 
 $ErrorActionPreference = 'Stop'
 
 Add-Type -AssemblyName System.Drawing
 
 $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$AssetsDir = Join-Path $ProjectRoot 'Assets'
+$AssetsDir = Join-Path $ProjectRoot 'JeekLauncher\Assets'
 $PngPath = Join-Path $AssetsDir 'jeek.png'
 $IcoPath = Join-Path $AssetsDir 'jeek.ico'
 

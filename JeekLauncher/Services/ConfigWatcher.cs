@@ -47,7 +47,7 @@ internal sealed class ConfigWatcher : IDisposable
         {
             _watcher = new FileSystemWatcher(dir)
             {
-                IncludeSubdirectories = true,
+                IncludeSubdirectories = false,
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.Size,
             };
             _watcher.Changed += OnEvent;
@@ -69,6 +69,11 @@ internal sealed class ConfigWatcher : IDisposable
         if (e is RenamedEventArgs renamed)
             changes |= ChangeKindFor(renamed.OldFullPath);
 
+        if (changes.HasFlag(ConfigChangeKind.Settings) && Storage.IsRecentSelfWrite(ConfigChangeKind.Settings))
+            changes &= ~ConfigChangeKind.Settings;
+        if (changes.HasFlag(ConfigChangeKind.QuickWords) && Storage.IsRecentSelfWrite(ConfigChangeKind.QuickWords))
+            changes &= ~ConfigChangeKind.QuickWords;
+
         if (changes != ConfigChangeKind.None)
             Schedule(changes);
     }
@@ -88,11 +93,11 @@ internal sealed class ConfigWatcher : IDisposable
 
     private void Schedule(ConfigChangeKind changes)
     {
-        if (_disposed)
-            return;
-
         lock (_gate)
         {
+            if (_disposed)
+                return;
+
             _pendingChanges |= changes;
             _debounce.Change(QuietPeriodMs, Timeout.Infinite);
         }
@@ -118,7 +123,8 @@ internal sealed class ConfigWatcher : IDisposable
         lock (_gate)
         {
             _pendingChanges = ConfigChangeKind.None;
-            _debounce.Change(Timeout.Infinite, Timeout.Infinite);
+            if (!_disposed)
+                _debounce.Change(Timeout.Infinite, Timeout.Infinite);
         }
 
         if (_watcher is null)
@@ -138,8 +144,15 @@ internal sealed class ConfigWatcher : IDisposable
 
     public void Dispose()
     {
-        _disposed = true;
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _pendingChanges = ConfigChangeKind.None;
+            _debounce.Dispose();
+        }
+
         Stop();
-        _debounce.Dispose();
     }
 }

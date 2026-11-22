@@ -15,7 +15,7 @@ public partial class LauncherWindow : Window
     /// <summary>Raised when the window should be dismissed (Esc / focus lost).</summary>
     public event Action? HideRequested;
 
-    /// <summary>Raised when the user binds a quick word to an app without launching it.</summary>
+    /// <summary>Raised when the user binds a quick word to an app and launches it.</summary>
     public event Action<AppEntry, string>? QuickWordSetRequested;
 
     private bool _editingQuickWord;
@@ -68,7 +68,7 @@ public partial class LauncherWindow : Window
             return;
         }
 
-        // Ctrl+G: bind a quick word to the selected app without launching it.
+        // Ctrl+G: bind a quick word to the selected app and launch it.
         if (e.Key == Key.G && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             OpenQuickWordEditor();
@@ -153,8 +153,8 @@ public partial class LauncherWindow : Window
 
         if (entry is not null && word.Length > 0)
             QuickWordSetRequested?.Invoke(entry, word);
-
-        SearchBox.Focus();
+        else
+            SearchBox.Focus();
     }
 
     private void CloseQuickWordEditor()

@@ -50,6 +50,22 @@ internal sealed class HotKey
         return false;
     }
 
+    /// <summary>
+    /// Tests whether a hotkey combination can be registered without leaving it registered
+    /// or altering the saved rollback binding. Expects the hotkey to be currently unregistered.
+    /// </summary>
+    public bool CanRegister(IntPtr hwnd, uint modifiers, uint virtualKey)
+    {
+        if (hwnd == IntPtr.Zero)
+            return true;
+
+        if (!RegisterHotKey(hwnd, HotkeyId, modifiers | ModNoRepeat, virtualKey))
+            return false;
+
+        UnregisterHotKey(hwnd, HotkeyId);
+        return true;
+    }
+
     public void Unregister()
     {
         if (_registered)
@@ -62,7 +78,7 @@ internal sealed class HotKey
     /// <summary>Avalonia <c>Win32Properties.CustomWndProcHookCallback</c> handler.</summary>
     public IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == WmHotkey && wParam.ToInt32() == HotkeyId)
+        if (msg == WmHotkey && wParam == (IntPtr)HotkeyId)
         {
             handled = true;
             Pressed?.Invoke();

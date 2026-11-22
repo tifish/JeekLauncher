@@ -48,7 +48,8 @@ public partial class App : Application
     private QuickWordsWindow? _quickWordsWindow;
     private bool _initialized;
     private DispatcherTimer? _updateTimer;
-    private bool _updateInProgress;
+    private int _updateInProgress;
+    private int _scanVersion;
 
     private static readonly ILogger Log = LogManager.CreateLogger(nameof(App));
 
@@ -202,7 +203,6 @@ public partial class App : Application
         var area = screen.WorkingArea;
         double scale = screen.Scaling;
         int width = (int)(_window.Width * scale);
-        int height = (int)(_window.Height * scale);
 
         int x = area.X + (area.Width - width) / 2;
         int y = area.Y + (int)(area.Height * 0.22);
@@ -219,8 +219,11 @@ public partial class App : Application
         // Remember the quick word so this query jumps to the top next time.
         _usage.Record(entry.Id);
         _usage.Save();
-        _quickWords.Set(query, entry.Id);
-        _quickWords.Save();
+        if (_quickWords.Set(query, entry.Id))
+        {
+            _quickWords.Save();
+            _quickWordsWindow?.Reload();
+        }
     }
 
     // Bind an explicit quick word to an app, then launch it.
@@ -276,14 +279,19 @@ public partial class App : Application
     /// <param name="onCompleted">Runs on the UI thread once the new catalog is in place.</param>
     private void StartScan(Action? onCompleted = null)
     {
+        int version = Interlocked.Increment(ref _scanVersion);
         var dirs = _local.ScanDirectories.ToArray();
         var thread = new Thread(() =>
         {
             var entries = ShortcutScanner.Scan(dirs);
             Dispatcher.UIThread.Post(() =>
             {
-                _entries = entries;
-                _viewModel.SetEntries(entries);
+                if (version == Volatile.Read(ref _scanVersion))
+                {
+                    _entries = entries;
+                    _viewModel.SetEntries(entries);
+                    _quickWordsWindow?.Reload();
+                }
                 onCompleted?.Invoke();
             });
         })
@@ -321,7 +329,8 @@ public partial class App : Application
             ApplyLanguage(_settings.Language);
             ApplyTheme(_settings.Theme);
             RestartUpdateTimer();
-            ReregisterHotkey();
+            if (_settingsWindow is null)
+                ReregisterHotkey();
             BuildTrayMenu();
         }
 
@@ -426,7 +435,7 @@ public partial class App : Application
 
             _settingsWindow = new SettingsWindow(
                 _settings, _local, Storage.EffectiveLocation, Storage.CustomDir,
-                ApplySettings, SetStorageLocation,
+                CanRegisterHotkey, ApplySettings, SetStorageLocation,
                 () => _ = CheckForUpdatesAsync(silent: false))
             {
                 Icon = _appIcon,
@@ -435,6 +444,7 @@ public partial class App : Application
             {
                 _settingsWindow = null;
                 ReregisterHotkey();
+                BuildTrayMenu();
             };
             _settingsWindow.Show();
         }
@@ -467,6 +477,13 @@ public partial class App : Application
         _viewModel.Refresh();
     }
 
+    private bool CanRegisterHotkey(string hotkeyText)
+    {
+        IntPtr handle = _window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        var hotkey = HotKeyDef.Parse(hotkeyText);
+        return _hotKey.CanRegister(handle, hotkey.Modifiers, hotkey.VirtualKey);
+    }
+
     /// <summary>
     /// Applies new settings (roamable + machine-local); returns whether the hotkey
     /// registered successfully. Any storage-mode switch has already been applied by the
@@ -474,8 +491,19 @@ public partial class App : Application
     /// </summary>
     private bool ApplySettings(AppSettings newSettings, LocalSettings newLocal)
     {
-        _settings = newSettings;
-        _local = newLocal;
+        if (!TryRegisterHotkey(newSettings.Hotkey))
+        {
+            // Keep the hotkey suspended while SettingsWindow stays open so the user
+            // can still press any shortcut in the capture box without firing the launcher.
+            _hotKey.Unregister();
+            return false;
+        }
+
+        // Mutate the loaded instances in place so their merge baselines stay intact —
+        // otherwise changing a setting back to its default would be discarded by the
+        // three-way merge in JsonSettingsFile.
+        _settings.ApplyFrom(newSettings);
+        _local.ApplyFrom(newLocal);
         _settings.Save();
         _local.Save();
 
@@ -484,25 +512,25 @@ public partial class App : Application
         ApplyTheme(_settings.Theme);
         RestartUpdateTimer();
 
-        bool hotkeyOk = ReregisterHotkey();
-
         BuildTrayMenu(); // refresh tooltip (and labels, if language was unchanged)
 
         // Re-watch the new directory set and rescan.
         _watcher?.Watch(ShortcutScanner.GetDirectories(_local.ScanDirectories));
         StartScan();
 
-        return hotkeyOk;
+        return true;
     }
 
     /// <summary>(Re)registers the global hotkey for the current settings; returns success.</summary>
-    private bool ReregisterHotkey()
+    private bool ReregisterHotkey() => TryRegisterHotkey(_settings.Hotkey);
+
+    private bool TryRegisterHotkey(string hotkeyText)
     {
         IntPtr handle = _window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         if (handle == IntPtr.Zero)
             return true;
 
-        var hotkey = HotKeyDef.Parse(_settings.Hotkey);
+        var hotkey = HotKeyDef.Parse(hotkeyText);
         bool ok = _hotKey.Register(handle, hotkey.Modifiers, hotkey.VirtualKey);
         _hotkeyFailedText = ok ? null : hotkey.Text;
         if (!ok)
@@ -575,9 +603,8 @@ public partial class App : Application
     /// </summary>
     private async Task CheckForUpdatesAsync(bool silent)
     {
-        if (_updateInProgress)
+        if (Interlocked.CompareExchange(ref _updateInProgress, 1, 0) != 0)
             return;
-        _updateInProgress = true;
         try
         {
             var outcome = await AutoUpdateService.HasUpdateAsync().ConfigureAwait(false);
@@ -643,7 +670,7 @@ public partial class App : Application
         }
         finally
         {
-            _updateInProgress = false;
+            Volatile.Write(ref _updateInProgress, 0);
         }
     }
 
@@ -693,13 +720,14 @@ public partial class App : Application
     // ---- Debug MCP ---------------------------------------------------------
 
     /// <summary>
-    /// Installs the fixed per-user stdio adapter, registers this build behind it, and starts
-    /// the named-pipe MCP host. Only Debug builds actually listen; the registration still runs
-    /// in Release so a shipped install can carry the adapter for a future product surface.
-    /// Failures here must never keep the launcher from starting.
+    /// In Debug builds, installs the fixed per-user stdio adapter, registers this worktree
+    /// behind it, and starts the named-pipe Debug MCP host. Release builds skip adapter
+    /// installation until a product MCP surface exists. Failures here must never keep the
+    /// launcher from starting.
     /// </summary>
     private void SetUpDebugMcp(IClassicDesktopStyleApplicationLifetime desktop)
     {
+#if DEBUG
         try
         {
             McpAdapterRegistration.RegisterCurrentInstance();
@@ -708,6 +736,7 @@ public partial class App : Application
         {
             Log.ZLogWarning($"Could not register the MCP adapter: {ex.Message}");
         }
+#endif
 
         try
         {
@@ -760,6 +789,8 @@ public partial class App : Application
             _tray.IsVisible = false;
             _tray.Dispose();
         }
+
+        LogManager.Shutdown();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             desktop.Shutdown();

@@ -73,11 +73,18 @@ internal static class AutoStart
         sb.AppendLine($"taskName={TaskName}");
         if (RunSchtasks($"/query /tn \"{TaskName}\" /xml", out string xml) == 0)
         {
-            var doc = XDocument.Parse(xml);
-            XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
-            sb.AppendLine($"taskCommand={doc.Descendants(ns + "Command").FirstOrDefault()?.Value}");
-            sb.AppendLine($"taskPriority={doc.Descendants(ns + "Priority").FirstOrDefault()?.Value}");
-            sb.AppendLine($"taskLogonUser={doc.Descendants(ns + "LogonTrigger").Descendants(ns + "UserId").FirstOrDefault()?.Value}");
+            try
+            {
+                var doc = XDocument.Parse(xml);
+                XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+                sb.AppendLine($"taskCommand={doc.Descendants(ns + "Command").FirstOrDefault()?.Value}");
+                sb.AppendLine($"taskPriority={doc.Descendants(ns + "Priority").FirstOrDefault()?.Value}");
+                sb.AppendLine($"taskLogonUser={doc.Descendants(ns + "LogonTrigger").Descendants(ns + "UserId").FirstOrDefault()?.Value}");
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"task=(unparseable xml: {ex.Message})");
+            }
         }
         else
         {
@@ -87,23 +94,29 @@ internal static class AutoStart
         return sb.ToString();
     }
 
-    private static bool TaskExists() => RunSchtasks($"/query /tn \"{TaskName}\"", out _) == 0;
+    private static bool TaskExists() => TaskExists(TaskName);
 
-    private static bool RegisterTask(string exe)
+    internal static bool TaskExists(string taskName) => RunSchtasks($"/query /tn \"{taskName}\"", out _) == 0;
+
+    internal static bool DeleteTask(string taskName) => RunSchtasks($"/delete /tn \"{taskName}\" /f", out _) == 0;
+
+    private static bool RegisterTask(string exe) => RegisterTask(exe, TaskName);
+
+    internal static bool RegisterTask(string exe, string taskName)
     {
-        string xmlPath = Path.Combine(Path.GetTempPath(), $"{TaskName}-{Environment.ProcessId}.xml");
+        string xmlPath = Path.Combine(Path.GetTempPath(), $"{taskName}-{Environment.ProcessId}.xml");
         try
         {
             // schtasks requires the XML file to be UTF-16.
             File.WriteAllText(xmlPath, BuildTaskXml(exe), Encoding.Unicode);
-            int code = RunSchtasks($"/create /tn \"{TaskName}\" /xml \"{xmlPath}\" /f", out string output);
+            int code = RunSchtasks($"/create /tn \"{taskName}\" /xml \"{xmlPath}\" /f", out string output);
             if (code != 0)
-                Log.ZLogWarning($"Could not register logon task {TaskName} (exit {code}): {output}");
+                Log.ZLogWarning($"Could not register logon task {taskName} (exit {code}): {output}");
             return code == 0;
         }
         catch (Exception ex)
         {
-            Log.ZLogWarning($"Could not register logon task {TaskName}: {ex.Message}");
+            Log.ZLogWarning($"Could not register logon task {taskName}: {ex.Message}");
             return false;
         }
         finally
@@ -172,7 +185,10 @@ internal static class AutoStart
             using var process = Process.Start(psi);
             if (process is null)
                 return -1;
-            output = (process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd()).Trim();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            string stdout = process.StandardOutput.ReadToEnd();
+            string stderr = stderrTask.GetAwaiter().GetResult();
+            output = (stdout + stderr).Trim();
             process.WaitForExit();
             return process.ExitCode;
         }

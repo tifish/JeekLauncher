@@ -51,10 +51,17 @@ internal static partial class Win32Interop
 
         if (foreThread != thisThread && foreThread != 0)
         {
-            AttachThreadInput(foreThread, thisThread, true);
-            SetForegroundWindow(hWnd);
-            SetFocus(hWnd);
-            AttachThreadInput(foreThread, thisThread, false);
+            bool attached = AttachThreadInput(foreThread, thisThread, true);
+            try
+            {
+                SetForegroundWindow(hWnd);
+                SetFocus(hWnd);
+            }
+            finally
+            {
+                if (attached)
+                    AttachThreadInput(foreThread, thisThread, false);
+            }
         }
         else
         {

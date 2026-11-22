@@ -67,35 +67,28 @@
   </ItemGroup>
 
   <!--
-    JeekLauncherMcp is the MCP stdio adapter. Agents launch the fixed per-user copy under
-    LocalAppData (or the repo-root JeekLauncherDebugMcp.cmd, which does); this publishes the
-    side-by-side copy the app installs there on startup. Renaming the old file first lets
-    Windows replace an image an agent still has running, instead of failing the build.
+    JeekLauncherMcp is the Debug MCP stdio adapter (no product MCP surface exists yet, so
+    Release builds skip it). Agents launch the fixed per-user copy under LocalAppData (via
+    the repo-root JeekLauncherDebugMcp.cmd); this publishes the side-by-side copy the app
+    installs there on startup. Renaming the old file first lets Windows replace an image an
+    agent still has running, instead of failing the build.
   -->
-  <Target Name="PublishJeekLauncherMcpAfterBuild" AfterTargets="Build" Condition="'$(_IsPublishing)' != 'true'">
-    <PropertyGroup>
-      <JeekLauncherMcpBuildDir>$([System.IO.Path]::GetFullPath('$(OutDir)', '$(MSBuildProjectDirectory)'))</JeekLauncherMcpBuildDir>
-      <_McpUnlockExe>$([System.IO.Path]::Combine('$(JeekLauncherMcpBuildDir)', 'JeekLauncherMcp.exe'))</_McpUnlockExe>
-      <_McpUnlockStamp>$([System.DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff'))</_McpUnlockStamp>
-    </PropertyGroup>
-    <Exec
-      Condition="Exists('$(_McpUnlockExe)')"
-      Command="move /Y &quot;$(_McpUnlockExe)&quot; &quot;$(_McpUnlockExe).$(_McpUnlockStamp).old&quot;"
-      ContinueOnError="true" />
-    <ItemGroup>
-      <_McpUnlockOld Include="$(JeekLauncherMcpBuildDir)\JeekLauncherMcp.exe.*.old" />
-    </ItemGroup>
-    <Delete Files="@(_McpUnlockOld)" TreatErrorsAsWarnings="true" ContinueOnError="true" />
-    <MSBuild
-      Projects="..\Tools\JeekLauncherMcp\JeekLauncherMcp.csproj"
-      Targets="Restore;Publish"
-      Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);PublishSingleFile=true;PublishDir=$(JeekLauncherMcpBuildDir)" />
+  <Target Name="PublishJeekLauncherMcpAfterBuild" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug' and '$(_IsPublishing)' != 'true'">
+    <CallTarget Targets="PublishJeekLauncherMcpCore" />
   </Target>
 
-  <Target Name="PublishJeekLauncherMcpAfterPublish" AfterTargets="Publish">
+  <Target Name="PublishJeekLauncherMcpAfterPublish" AfterTargets="Publish" Condition="'$(Configuration)' == 'Debug'">
     <PropertyGroup>
-      <JeekLauncherMcpPublishDir>$([System.IO.Path]::GetFullPath('$(PublishDir)', '$(MSBuildProjectDirectory)'))</JeekLauncherMcpPublishDir>
-      <_McpUnlockExe>$([System.IO.Path]::Combine('$(JeekLauncherMcpPublishDir)', 'JeekLauncherMcp.exe'))</_McpUnlockExe>
+      <_JeekLauncherMcpTargetDir>$(PublishDir)</_JeekLauncherMcpTargetDir>
+    </PropertyGroup>
+    <CallTarget Targets="PublishJeekLauncherMcpCore" />
+  </Target>
+
+  <Target Name="PublishJeekLauncherMcpCore">
+    <PropertyGroup>
+      <_JeekLauncherMcpTargetDir Condition="'$(_JeekLauncherMcpTargetDir)' == ''">$(OutDir)</_JeekLauncherMcpTargetDir>
+      <JeekLauncherMcpDir>$([System.IO.Path]::GetFullPath('$(_JeekLauncherMcpTargetDir)', '$(MSBuildProjectDirectory)'))</JeekLauncherMcpDir>
+      <_McpUnlockExe>$([System.IO.Path]::Combine('$(JeekLauncherMcpDir)', 'JeekLauncherMcp.exe'))</_McpUnlockExe>
       <_McpUnlockStamp>$([System.DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff'))</_McpUnlockStamp>
     </PropertyGroup>
     <Exec
@@ -103,20 +96,19 @@
       Command="move /Y &quot;$(_McpUnlockExe)&quot; &quot;$(_McpUnlockExe).$(_McpUnlockStamp).old&quot;"
       ContinueOnError="true" />
     <ItemGroup>
-      <_McpUnlockOld Include="$(JeekLauncherMcpPublishDir)\JeekLauncherMcp.exe.*.old" />
+      <_McpUnlockOld Include="$(JeekLauncherMcpDir)\JeekLauncherMcp.exe.*.old" />
     </ItemGroup>
     <Delete Files="@(_McpUnlockOld)" TreatErrorsAsWarnings="true" ContinueOnError="true" />
     <MSBuild
       Projects="..\Tools\JeekLauncherMcp\JeekLauncherMcp.csproj"
       Targets="Restore;Publish"
-      Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);PublishSingleFile=true;PublishDir=$(JeekLauncherMcpPublishDir)" />
+      Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);PublishSingleFile=true;PublishDir=$(JeekLauncherMcpDir)" />
   </Target>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
-    <PackageReference Include="System.Drawing.Common" Version="10.0.9" />
     <PackageReference Include="ToolGood.Words.Pinyin" Version="3.1.0.4" />
     <PackageReference Include="Jeek.Avalonia.Localization" Version="12.0.2" />
     <PackageReference Include="nulastudio.NetBeauty" Version="2.1.5" />
