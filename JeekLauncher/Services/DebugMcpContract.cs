@@ -122,7 +122,15 @@ public static class DebugMcpContract
                 ["target"] = Prop("string", "Target app id (required for set)."),
                 ["new_word"] = Prop("string", "Replacement quick word key (required for rename)."),
             },
-            ["action"]));
+            ["action"]),
+        Tool("environment_state",
+            "Report process environment sync state (WM_SETTINGCHANGE hook, notification/refresh counts, last changes) and optionally inspect variables or trigger a manual refresh.",
+            new()
+            {
+                ["name"] = Prop("string", "Exact variable name (case-insensitive) to read from the current process."),
+                ["filter"] = Prop("string", "Case-insensitive substring filter to list matching process environment variables."),
+                ["refresh"] = Prop("boolean", "Trigger a synchronous environment refresh before reporting state (default false)."),
+            }));
 
     private static JsonObject Tool(string name, string description, JsonObject properties, string[]? required = null)
     {

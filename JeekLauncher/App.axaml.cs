@@ -37,6 +37,7 @@ public partial class App : Application
     private LauncherViewModel _viewModel = null!;
     private LauncherWindow _window = null!;
     private readonly HotKey _hotKey = new();
+    private readonly EnvironmentSync _environmentSync = new();
     private TrayIcon? _tray;
     private WindowIcon? _appIcon;
     private string? _hotkeyFailedText;
@@ -66,6 +67,7 @@ public partial class App : Application
     internal LocalSettings DebugLocalSettings => _local;
     internal UsageStore DebugUsage => _usage;
     internal QuickWordStore DebugQuickWords => _quickWords;
+    internal EnvironmentSync DebugEnvironmentSync => _environmentSync;
 
     /// <summary>Hotkey text that failed to register, or null when the hotkey is held.</summary>
     internal string? DebugHotkeyFailure => _hotkeyFailedText;
@@ -163,6 +165,9 @@ public partial class App : Application
         if (handle != IntPtr.Zero)
         {
             Win32Properties.AddWndProcHookCallback(_window, _hotKey.WndProc);
+            _environmentSync.CaptureBaseline();
+            Win32Properties.AddWndProcHookCallback(_window, _environmentSync.WndProc);
+            _environmentSync.HookAttached = true;
 
             if (!ReregisterHotkey())
             {
@@ -795,6 +800,7 @@ public partial class App : Application
     private void Shutdown()
     {
         _hotKey.Unregister();
+        _environmentSync.Dispose();
         _updateTimer?.Stop();
         _watcher?.Dispose();
         _configWatcher?.Dispose();

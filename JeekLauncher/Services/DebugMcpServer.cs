@@ -101,6 +101,7 @@ internal static class DebugMcpServer
         host.AddTool("autostart_state", _ => Task.Run(() => ToolText(AutoStart.Describe())));
         host.AddTool("quick_words", QuickWordsAsync);
         host.AddTool("quick_words_action", QuickWordsActionAsync);
+        host.AddTool("environment_state", EnvironmentStateAsync);
         return host;
     }
 
@@ -725,6 +726,60 @@ internal static class DebugMcpServer
         });
 
         return ToolText(text);
+    }
+
+    private static async Task<JsonObject> EnvironmentStateAsync(JsonObject args)
+    {
+        var name = args["name"]?.GetValue<string>();
+        var filter = args["filter"]?.GetValue<string>();
+        var refresh = args["refresh"]?.GetValue<bool>() ?? false;
+
+        var sync = await OnUiAsync(() => CurrentApp.DebugEnvironmentSync);
+        var snapshot = await Task.Run(() => refresh ? sync.Refresh() : sync.GetSnapshot());
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"hookAttached={snapshot.HookAttached}");
+        sb.AppendLine($"baselineCount={snapshot.BaselineCount}");
+        sb.AppendLine($"notificationCount={snapshot.NotificationCount}");
+        sb.AppendLine($"refreshCount={snapshot.RefreshCount}");
+        sb.AppendLine($"lastRefreshUtc={(snapshot.LastRefreshUtc?.ToString("O") ?? "(never)")}");
+        sb.AppendLine($"lastDiff=+{snapshot.LastAdded} ~{snapshot.LastUpdated} -{snapshot.LastRemoved}");
+        sb.AppendLine($"lastChanges={(snapshot.LastChanges.Count > 0 ? string.Join(", ", snapshot.LastChanges) : "(none)")}");
+        sb.AppendLine($"lastError={snapshot.LastError ?? "(none)"}");
+
+        var processVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.Process);
+        sb.AppendLine($"processVarCount={processVars.Count}");
+
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            string? value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Process);
+            sb.AppendLine();
+            sb.AppendLine($"var[{name}]={(value is null ? "(not set)" : value)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            var matched = new List<KeyValuePair<string, string>>();
+            foreach (System.Collections.DictionaryEntry entry in processVars)
+            {
+                if (entry.Key is string key
+                    && key.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                    && entry.Value is string value)
+                {
+                    matched.Add(new KeyValuePair<string, string>(key, value));
+                }
+            }
+
+            matched.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Key, b.Key));
+            sb.AppendLine();
+            sb.AppendLine($"filter=\"{filter}\" matched={matched.Count}");
+            foreach (var (k, v) in matched.Take(50))
+                sb.AppendLine($"{k}={v}");
+            if (matched.Count > 50)
+                sb.AppendLine($"… {matched.Count - 50} more.");
+        }
+
+        return ToolText(sb.ToString());
     }
 
     #endregion
