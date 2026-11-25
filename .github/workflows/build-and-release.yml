@@ -49,17 +49,18 @@ jobs:
                   Get-ChildItem -Path bin -Filter Logs -Recurse -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
                   Compress-Archive -Path bin\* -DestinationPath ${{ env.PROJECT_NAME }}.zip -Force
 
-            - name: Delete release and tag
+            - name: Publish release
               if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              run: gh release delete ${{ env.RELEASE_TAG }} --cleanup-tag -y
-              continue-on-error: true
-
-            - name: Create a new tag and release
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              run: gh release create ${{ env.RELEASE_TAG }} --generate-notes
-
-            - name: Upload artifacts
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              shell: pwsh
               run: |
-                  gh release upload ${{ env.RELEASE_TAG }} ${{ env.PROJECT_NAME }}.zip --clobber
-                  gh release upload ${{ env.RELEASE_TAG }} version.txt --clobber
+                  git tag -f ${{ env.RELEASE_TAG }}
+                  git push -f origin refs/tags/${{ env.RELEASE_TAG }}
+                  gh release view ${{ env.RELEASE_TAG }} *> $null
+                  if ($LASTEXITCODE -eq 0) {
+                      gh release delete ${{ env.RELEASE_TAG }} -y
+                  }
+                  gh release create ${{ env.RELEASE_TAG }} `
+                      ${{ env.PROJECT_NAME }}.zip version.txt `
+                      --title ${{ env.RELEASE_TAG }} `
+                      --generate-notes `
+                      --latest
