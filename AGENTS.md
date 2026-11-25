@@ -6,6 +6,7 @@
     - Do **not** use `Publish.cmd` or `-c Release` for this loop: `Publish.cmd` builds a Release package into `publish\` (strips PDBs, skips the Debug MCP adapter). Use it for packaging, not for feature testing.
     - If the program from the current worktree is already running, kill only the process whose executable path matches this worktree, then run it again. Leave instances from other worktrees running.
   - Use the current worktree's debug MCP (`JeekLauncherDebugMcp.cmd` at the repo root) to test the feature or bug; if anything is wrong, fix it and test again until it passes.
+  - Automatically commit and push after finishing and verifying each change.
 - When reading code, logs, and the debug MCP are not enough to locate a problem, use a debugger:
   - Use `netcoredbg` on the Debug build to set breakpoints, step, and inspect variables; feed it a command script via stdin (`Get-Content cmds.txt | netcoredbg --interpreter=cli --attach <pid>`), and drive the program to the breakpoint through the debug MCP.
   - Use `dotnet-dump` to analyze hangs and crashes (`dotnet-dump collect -p <pid>`, then `dotnet-dump analyze <dump> -c "clrstack -all" -c threads -c exit`).
