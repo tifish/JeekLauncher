@@ -100,6 +100,7 @@ internal static class DebugMcpServer
         host.AddTool("hotkey_state", _ => HotkeyStateAsync());
         host.AddTool("autostart_state", _ => Task.Run(() => ToolText(AutoStart.Describe())));
         host.AddTool("quick_words", QuickWordsAsync);
+        host.AddTool("quick_words_action", QuickWordsActionAsync);
         return host;
     }
 
@@ -541,9 +542,12 @@ internal static class DebugMcpServer
             sb.AppendLine($"customStorageDir={(local.CustomStorageDir.Length > 0 ? local.CustomStorageDir : "(none)")}");
             sb.AppendLine();
             sb.AppendLine("--- paths ---");
+            sb.AppendLine($"machineName={Storage.MachineName}");
             sb.AppendLine($"roamableConfigDir={Storage.RoamableConfigDir}");
             sb.AppendLine($"settings={Storage.SettingsPath} exists={File.Exists(Storage.SettingsPath)}");
-            sb.AppendLine($"quickWords={Storage.QuickWordsPath} exists={File.Exists(Storage.QuickWordsPath)}");
+            sb.AppendLine($"quickWordsDir={Storage.QuickWordsDir} exists={Directory.Exists(Storage.QuickWordsDir)}");
+            sb.AppendLine($"quickWordsShard={Storage.QuickWordsPath} exists={File.Exists(Storage.QuickWordsPath)}");
+            sb.AppendLine($"quickWordsLegacy={Storage.LegacyQuickWordsPath} exists={File.Exists(Storage.LegacyQuickWordsPath)}");
             sb.AppendLine($"localConfigDir={Storage.LocalConfigDir}");
             sb.AppendLine($"localSettings={Storage.LocalSettingsPath} exists={File.Exists(Storage.LocalSettingsPath)}");
             sb.AppendLine($"usage={Storage.UsagePath} exists={File.Exists(Storage.UsagePath)}");
@@ -592,31 +596,123 @@ internal static class DebugMcpServer
     private static async Task<JsonObject> QuickWordsAsync(JsonObject args)
     {
         var filter = args["filter"]?.GetValue<string>();
+        var includeDeleted = args["include_deleted"]?.GetValue<bool>() ?? false;
 
         var text = await OnUiAsync(() =>
         {
             var app = CurrentApp;
-            var words = app.DebugQuickWords.Words;
+            var store = app.DebugQuickWords;
+            var words = store.Words;
+            var entries = store.Entries;
             var byId = app.DebugEntries.ToDictionary(e => e.Id, StringComparer.OrdinalIgnoreCase);
 
-            var matched = words
+            var matched = entries
+                .Where(pair => includeDeleted || (!pair.Value.Deleted && !string.IsNullOrEmpty(pair.Value.Target)))
                 .Where(pair => filter is not { Length: > 0 }
                                || pair.Key.Contains(filter, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             var sb = new StringBuilder();
-            sb.AppendLine($"quickWords={words.Count} matched={matched.Count}");
-            sb.AppendLine($"file={Storage.QuickWordsPath}");
+            sb.AppendLine($"activeQuickWords={words.Count} totalEntries={entries.Count} matched={matched.Count}");
+            sb.AppendLine($"machine={store.MachineName}");
+            sb.AppendLine($"dir={Storage.QuickWordsDir}");
+            sb.AppendLine($"ownShard={Storage.QuickWordsPath} exists={File.Exists(Storage.QuickWordsPath)}");
+            sb.AppendLine($"loadedShards={store.LoadedShardFiles.Count}");
+            foreach (var shard in store.LoadedShardFiles)
+                sb.AppendLine($"  - {shard}");
             sb.AppendLine();
-            sb.AppendLine("word -> target (present?)");
-            foreach (var (word, id) in matched)
+            sb.AppendLine("word -> target [by / ts] (present?)");
+            foreach (var (word, entry) in matched)
             {
-                var present = byId.TryGetValue(id, out AppEntry? entry);
-                sb.AppendLine($"{word} -> {id}  {(present ? $"(ok: {entry!.Name})" : "(missing from catalog)")}");
+                var by = string.IsNullOrEmpty(entry.UpdatedBy) ? "(legacy)" : entry.UpdatedBy;
+                if (entry.Deleted)
+                {
+                    sb.AppendLine($"{word} -> [DELETED]  [by={by} ts={entry.UpdatedAtUtcMs}]");
+                    continue;
+                }
+
+                var present = byId.TryGetValue(entry.Target, out AppEntry? appEntry);
+                sb.AppendLine(
+                    $"{word} -> {entry.Target}  [by={by} ts={entry.UpdatedAtUtcMs}] "
+                    + (present ? $"(ok: {appEntry!.Name})" : "(missing from catalog)"));
             }
 
             return sb.ToString();
+        });
+
+        return ToolText(text);
+    }
+
+    private static async Task<JsonObject> QuickWordsActionAsync(JsonObject args)
+    {
+        var action = McpHost.RequiredString(args, "action").Trim().ToLowerInvariant();
+        var word = args["word"]?.GetValue<string>() ?? "";
+        var target = args["target"]?.GetValue<string>() ?? "";
+        var newWord = args["new_word"]?.GetValue<string>() ?? "";
+
+        var text = await OnUiAsync(() =>
+        {
+            var app = CurrentApp;
+            var store = app.DebugQuickWords;
+            bool changed;
+
+            switch (action)
+            {
+                case "set":
+                    if (string.IsNullOrWhiteSpace(word) || string.IsNullOrWhiteSpace(target))
+                        throw new InvalidOperationException("'set' requires non-empty 'word' and 'target'.");
+                    changed = store.Set(word, target);
+                    if (changed)
+                    {
+                        store.Save();
+                        app.DebugRefreshQuickWordsUi();
+                    }
+                    break;
+
+                case "rename":
+                    if (string.IsNullOrWhiteSpace(word) || string.IsNullOrWhiteSpace(newWord))
+                        throw new InvalidOperationException("'rename' requires non-empty 'word' and 'new_word'.");
+                    changed = store.Rename(word, newWord);
+                    if (changed)
+                    {
+                        store.Save();
+                        app.DebugRefreshQuickWordsUi();
+                    }
+                    break;
+
+                case "remove":
+                    if (string.IsNullOrWhiteSpace(word))
+                        throw new InvalidOperationException("'remove' requires non-empty 'word'.");
+                    changed = store.Remove(word);
+                    if (changed)
+                    {
+                        store.Save();
+                        app.DebugRefreshQuickWordsUi();
+                    }
+                    break;
+
+                case "clear":
+                    changed = store.Clear();
+                    if (changed)
+                    {
+                        store.Save();
+                        app.DebugRefreshQuickWordsUi();
+                    }
+                    break;
+
+                case "reload":
+                    app.DebugReloadQuickWords();
+                    changed = true;
+                    break;
+
+                default:
+                    throw new InvalidOperationException(
+                        $"Unknown action '{action}'. Expected one of: set, rename, remove, clear, reload.");
+            }
+
+            return $"action={action} changed={changed} activeQuickWords={store.Words.Count} "
+                   + $"totalEntries={store.Entries.Count} loadedShards={store.LoadedShardFiles.Count}";
         });
 
         return ToolText(text);

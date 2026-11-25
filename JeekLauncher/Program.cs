@@ -11,13 +11,14 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        // Headless diagnostics: JeekLauncher.exe --selftest [all|search|watch|autostart|lang]
+        // Headless diagnostics: JeekLauncher.exe --selftest [all|search|watch|autostart|lang|quickwords]
         if (args.Contains("--selftest"))
         {
             string mode = args.Contains("all") ? "all"
                 : args.Contains("watch") ? "watch"
                 : args.Contains("autostart") ? "autostart"
                 : args.Contains("lang") ? "lang"
+                : args.Contains("quickwords") ? "quickwords"
                 : "search";
             SelfTest.Run(mode);
             return;

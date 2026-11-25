@@ -74,6 +74,18 @@ public partial class App : Application
 
     internal void DebugHideLauncher() => HideLauncher();
 
+    internal void DebugReloadQuickWords()
+    {
+        _quickWords.ReloadFromDisk();
+        DebugRefreshQuickWordsUi();
+    }
+
+    internal void DebugRefreshQuickWordsUi()
+    {
+        _quickWordsWindow?.Reload();
+        _viewModel.Refresh();
+    }
+
     /// <summary>Rescans the shortcut directories and completes once the catalog is replaced.</summary>
     internal Task DebugRescanAsync()
     {
@@ -239,9 +251,11 @@ public partial class App : Application
         // Bump the launch count and bind the explicit quick word to the app.
         _usage.Record(entry.Id);
         _usage.Save();
-        _quickWords.Set(w, entry.Id);
-        _quickWords.Save();
-        _quickWordsWindow?.Reload();
+        if (_quickWords.Set(w, entry.Id))
+        {
+            _quickWords.Save();
+            _quickWordsWindow?.Reload();
+        }
     }
 
     /// <summary>Hides the launcher and starts the app; returns whether it launched.</summary>
@@ -360,9 +374,12 @@ public partial class App : Application
         if (!moveFiles)
         {
             // Nothing was carried over, so the destination has no file to merge into:
-            // write the in-memory state out whole.
+            // write the in-memory settings out whole, and merge QuickWords with any
+            // existing machine shards at the destination.
             _settings.Save(forceAllLocal: true);
-            _quickWords.Save();
+            _quickWords.SyncWithCurrentLocation();
+            _quickWordsWindow?.Reload();
+            _viewModel.Refresh();
         }
 
         _configWatcher?.Watch(Storage.RoamableConfigDir);

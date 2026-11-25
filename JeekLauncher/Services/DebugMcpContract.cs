@@ -107,8 +107,22 @@ public static class DebugMcpContract
             "Report 'start with Windows': whether the per-user logon task exists, its command/priority/trigger user, and any legacy HKCU Run value.",
             new()),
         Tool("quick_words",
-            "List the remembered 'quick word -> app' bindings and whether each target still exists in the catalog.",
-            new() { ["filter"] = Prop("string", "Case-insensitive substring of the quick word.") }));
+            "List the merged 'quick word -> app' bindings across all machine shards, with source machine, timestamp, loaded shard files, and optional deletion tombstones.",
+            new()
+            {
+                ["filter"] = Prop("string", "Case-insensitive substring of the quick word."),
+                ["include_deleted"] = Prop("boolean", "Also include deletion tombstones (default false)."),
+            }),
+        Tool("quick_words_action",
+            "Mutate or reload quick words on the UI thread (writes only this machine's shard under Config/QuickWords/<MachineName>.json).",
+            new()
+            {
+                ["action"] = Prop("string", "One of: set, rename, remove, clear, reload."),
+                ["word"] = Prop("string", "Quick word key (required for set, rename, remove)."),
+                ["target"] = Prop("string", "Target app id (required for set)."),
+                ["new_word"] = Prop("string", "Replacement quick word key (required for rename)."),
+            },
+            ["action"]));
 
     private static JsonObject Tool(string name, string description, JsonObject properties, string[]? required = null)
     {

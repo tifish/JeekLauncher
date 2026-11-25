@@ -48,11 +48,25 @@ public static class Storage
     /// <summary>The location actually in effect (an existing portable folder overrides the saved one).</summary>
     public static StorageLocation EffectiveLocation => Backing.ResolveEffectiveLocation(Location);
 
-    /// <summary>Where roamable settings (settings.json + QuickWords.json) live right now.</summary>
+    /// <summary>Sanitized machine name used to name this machine's QuickWords shard.</summary>
+    public static string MachineName { get; } = QuickWordStore.SanitizeMachineName(Environment.MachineName);
+
+    internal const string QuickWordsDirName = "QuickWords";
+    internal const string LegacyQuickWordsFileName = "QuickWords.json";
+
+    /// <summary>Where roamable settings (settings.json + QuickWords/&lt;MachineName&gt;.json) live right now.</summary>
     public static string RoamableConfigDir => ConfigRootFor(EffectiveLocation, CustomDir);
 
     public static string SettingsPath => Path.Combine(RoamableConfigDir, "settings.json");
-    public static string QuickWordsPath => Path.Combine(RoamableConfigDir, "QuickWords.json");
+
+    /// <summary>Subdirectory holding per-machine QuickWords shards.</summary>
+    public static string QuickWordsDir => Path.Combine(RoamableConfigDir, QuickWordsDirName);
+
+    /// <summary>This machine's own QuickWords shard file.</summary>
+    public static string QuickWordsPath => Path.Combine(QuickWordsDir, $"{MachineName}.json");
+
+    /// <summary>Legacy single-file QuickWords path, read as a fallback layer when present.</summary>
+    public static string LegacyQuickWordsPath => Path.Combine(RoamableConfigDir, LegacyQuickWordsFileName);
 
     public static string ConfigRootFor(StorageLocation location, string? customDir)
         => Backing.ResolveConfigRoot(location, customDir);
@@ -136,6 +150,7 @@ public static class Storage
 
     public static void EnsureLocalConfigDir() => Directory.CreateDirectory(LocalConfigDir);
     public static void EnsureRoamableConfigDir() => Directory.CreateDirectory(RoamableConfigDir);
+    public static void EnsureQuickWordsDir() => Directory.CreateDirectory(QuickWordsDir);
 
     private static string NormalizePath(string path)
         => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -358,56 +373,6 @@ public sealed class LocalSettings
             .Where(dir => !string.IsNullOrWhiteSpace(dir))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-    }
-}
-
-/// <summary>
-/// Maps a typed query (the "quick word") to the item id launched for it, so the
-/// same query jumps straight to that item next time. Roamable.
-/// </summary>
-public sealed class QuickWordStore
-{
-    /// <summary>Maps a typed query to the item id that was launched for it.</summary>
-    public Dictionary<string, string> Words { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-    public string? GetTarget(string query)
-        => Words.TryGetValue(query, out string? id) ? id : null;
-
-    /// <summary>Remember "query -> id" (no-op for an empty query). Returns true if stored.</summary>
-    public bool Set(string query, string id)
-    {
-        string q = query.Trim().ToLowerInvariant();
-        if (q.Length == 0)
-            return false;
-
-        Words[q] = id;
-        return true;
-    }
-
-    public static QuickWordStore Load()
-    {
-        JsonSettingsFile.TryLoad(Storage.QuickWordsPath, out QuickWordStore store);
-        store.Words = new Dictionary<string, string>(store.Words, StringComparer.OrdinalIgnoreCase);
-        return store;
-    }
-
-    /// <summary>Re-read the words from disk in place (keeps this shared instance valid).</summary>
-    public void ReloadFromDisk() => Words = Load().Words;
-
-    public void Save()
-    {
-        try
-        {
-            Storage.EnsureRoamableConfigDir();
-            using var lease = SharedDataFile.Acquire(Storage.QuickWordsPath);
-            Storage.MarkSelfWrite(ConfigChangeKind.QuickWords);
-            SharedDataFile.WriteAllTextAtomic(Storage.QuickWordsPath, JsonSettingsFile.Serialize(this));
-            Storage.MarkSelfWrite(ConfigChangeKind.QuickWords);
-        }
-        catch
-        {
-            // Saving quick words is best-effort.
-        }
     }
 }
 

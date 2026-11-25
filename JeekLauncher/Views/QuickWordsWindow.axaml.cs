@@ -54,11 +54,12 @@ public partial class QuickWordsWindow : Window
         if (word.Length == 0)
             return;
 
-        _quickWords.Words[word] = app.Id;
+        bool changed = _quickWords.Set(word, app.Id);
         NewWordBox.Text = string.Empty;
         AppBox.Text = string.Empty;
         AppBox.SelectedItem = null;
-        Persist();
+        if (changed)
+            Persist();
     }
 
     public void Reload()
@@ -101,9 +102,8 @@ public partial class QuickWordsWindow : Window
         if (newWord.Length == 0 || newWord == row.Word)
             return;
 
-        _quickWords.Words.Remove(row.Word);
-        _quickWords.Words[newWord] = row.TargetPath;
-        Persist();
+        if (_quickWords.Rename(row.Word, newWord))
+            Persist();
     }
 
     private void OnDelete(object? sender, RoutedEventArgs e)
@@ -111,8 +111,8 @@ public partial class QuickWordsWindow : Window
         if (_quickWords is null || RowsList.SelectedItem is not QuickWordRow row)
             return;
 
-        _quickWords.Words.Remove(row.Word);
-        Persist();
+        if (_quickWords.Remove(row.Word))
+            Persist();
     }
 
     private void OnClear(object? sender, RoutedEventArgs e)
@@ -120,8 +120,8 @@ public partial class QuickWordsWindow : Window
         if (_quickWords is null)
             return;
 
-        _quickWords.Words.Clear();
-        Persist();
+        if (_quickWords.Clear())
+            Persist();
     }
 
     private void Persist()
