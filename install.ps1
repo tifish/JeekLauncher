@@ -284,9 +284,13 @@ try {
 
     $exePath = Join-Path $InstallDir $ExeName
     if (-not (Test-DotnetRuntime)) {
+        $setupScript = Join-Path $InstallDir 'Scripts\Setup.cmd'
+        if (-not (Test-Path -LiteralPath $setupScript)) {
+            $setupScript = Join-Path $InstallDir 'Setup.cmd'
+        }
         Write-Step '.NET 10 runtime not found — running Setup.cmd'
         # Setup.cmd installs the runtime (elevating if needed) and then starts the app.
-        Start-Process -FilePath (Join-Path $InstallDir 'Setup.cmd') -WorkingDirectory $InstallDir
+        Start-Process -FilePath $setupScript -WorkingDirectory $InstallDir
     }
     elseif (-not $NoLaunch) {
         Write-Step "Starting $AppName"

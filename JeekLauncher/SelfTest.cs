@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading;
 using Jeek.Avalonia.Localization;
 using JeekLauncher.Services;
+using JeekTools;
 
 namespace JeekLauncher;
 
@@ -169,7 +170,7 @@ internal static class SelfTest
         var report = new StringBuilder();
 
         Localizer.SetLocalizer(new TabLocalizer(
-            Path.Combine(AppContext.BaseDirectory, "Data", "Languages.tab")));
+            Path.Combine(AppPaths.ProgramDir, "Data", "Languages.tab")));
 
         report.AppendLine("languages: " + string.Join(", ", Localizer.Languages));
         report.AppendLine();

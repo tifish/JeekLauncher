@@ -14,48 +14,11 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <ApplicationIcon>Assets/jeek.ico</ApplicationIcon>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <OutDir>..\bin</OutDir>
+    <OutDir>..\bin\Runtime\</OutDir>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <CETCompat>false</CETCompat>
     <PublishReadyToRun>true</PublishReadyToRun>
     <PublishDir>$(OutDir)</PublishDir>
-  </PropertyGroup>
-
-  <PropertyGroup>
-    <BeautySharedRuntimeMode>False</BeautySharedRuntimeMode>
-    <!-- beauty into sub-directory, default is libs, quote with "" if contains space  -->
-    <BeautyLibsDir Condition="$(BeautySharedRuntimeMode) == 'True'">../Libs</BeautyLibsDir>
-    <BeautyLibsDir Condition="$(BeautySharedRuntimeMode) != 'True'">./Libs</BeautyLibsDir>
-    <!-- dlls that you don't want to be moved or can not be moved -->
-    <!-- <BeautyExcludes>dll1.dll;lib*;...</BeautyExcludes> -->
-    <!-- dlls that end users never needed, so hide them -->
-    <!-- <BeautyHiddens>hostfxr;hostpolicy;*.deps.json;*.runtimeconfig*.json</BeautyHiddens> -->
-    <!-- set to True if you want to disable -->
-    <DisableBeauty>False</DisableBeauty>
-    <!-- set to False if you want to beauty on build -->
-    <BeautyOnPublishOnly>False</BeautyOnPublishOnly>
-    <!-- DO NOT TOUCH THIS OPTION -->
-    <BeautyNoRuntimeInfo>False</BeautyNoRuntimeInfo>
-    <!-- set to True if you want to allow 3rd debuggers(like dnSpy) debugs the app -->
-    <BeautyEnableDebugging>False</BeautyEnableDebugging>
-    <!-- the patch can reduce the file count -->
-    <!-- set to False if you want to disable -->
-    <!-- SCD Mode Feature Only -->
-    <BeautyUsePatch>True</BeautyUsePatch>
-    <!-- App Entry Dll = BeautyDir + BeautyAppHostDir + BeautyAppHostEntry -->
-    <!-- see https://github.com/nulastudio/NetBeauty2#customize-apphost for more details -->
-    <!-- relative path based on AppHostDir -->
-    <!-- .NET Core Non Single-File Only -->
-    <!-- <BeautyAppHostEntry>bin/MyApp.dll</BeautyAppHostEntry> -->
-    <!-- relative path based on BeautyDir -->
-    <!-- .NET Core Non Single-File Only -->
-    <!-- <BeautyAppHostDir>..</BeautyAppHostDir> -->
-    <!-- <BeautyAfterTasks></BeautyAfterTasks> -->
-    <!-- valid values: Error|Detail|Info -->
-    <BeautyLogLevel>Info</BeautyLogLevel>
-    <!-- set to a repo mirror if you have troble in connecting github -->
-    <!-- <BeautyGitCDN>https://gitee.com/liesauer/HostFXRPatcher</BeautyGitCDN> -->
-    <!-- <BeautyGitTree>master</BeautyGitTree> -->
   </PropertyGroup>
 
   <ItemGroup>
@@ -67,19 +30,80 @@
   </ItemGroup>
 
   <!--
+    Keep the app root clean (only JeekLauncher.exe alongside Runtime\, Data\, Scripts\, etc.):
+    all managed and native assemblies are built/published into Runtime\, and a standard .NET
+    AppHost is created in the parent directory pointing to Runtime/JeekLauncher.dll.
+  -->
+  <Target Name="CreateNestedAppHostAfterBuild"
+          AfterTargets="Build"
+          DependsOnTargets="_GetAppHostPaths;_GetAppHostCreationConfiguration"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(_IsPublishing)' != 'true'">
+    <PropertyGroup>
+      <_NestedRuntimeDir>$([System.IO.Path]::TrimEndingDirectorySeparator($([System.IO.Path]::GetFullPath('$(TargetDir)'))))</_NestedRuntimeDir>
+      <_NestedAppRoot>$([System.IO.Path]::GetDirectoryName('$(_NestedRuntimeDir)'))</_NestedAppRoot>
+      <_NestedRuntimeFolderName>$([System.IO.Path]::GetFileName('$(_NestedRuntimeDir)'))</_NestedRuntimeFolderName>
+    </PropertyGroup>
+    <CreateAppHost AppHostSourcePath="$(AppHostSourcePath)"
+                   AppHostDestinationPath="$(_NestedAppRoot)\$(AssemblyName).exe"
+                   AppBinaryName="$(_NestedRuntimeFolderName)/$(AssemblyName)$(TargetExt)"
+                   IntermediateAssembly="@(IntermediateAssembly->'%(FullPath)')"
+                   WindowsGraphicalUserInterface="$(_UseWindowsGraphicalUserInterface)"
+                   Retries="$(CopyRetryCount)"
+                   RetryDelayMilliseconds="$(CopyRetryDelayMilliseconds)"
+                   EnableMacOSCodeSign="$(_EnableMacOSCodeSign)"
+                   DisableCetCompat="$(_DisableCetCompat)" />
+    <Delete Files="$(_NestedRuntimeDir)\$(AssemblyName).exe"
+            Condition="Exists('$(_NestedRuntimeDir)\$(AssemblyName).exe')" />
+  </Target>
+
+  <Target Name="CreateNestedAppHostAfterPublish"
+          AfterTargets="Publish"
+          DependsOnTargets="_GetAppHostPaths;_GetAppHostCreationConfiguration"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_PublishFullDir>$([System.IO.Path]::TrimEndingDirectorySeparator($([System.IO.Path]::GetFullPath('$(PublishDir)', '$(MSBuildProjectDirectory)'))))</_PublishFullDir>
+      <_PublishLeafName>$([System.IO.Path]::GetFileName('$(_PublishFullDir)'))</_PublishLeafName>
+      <_PublishRuntimeDir Condition="'$(_PublishLeafName)' == 'Runtime'">$(_PublishFullDir)</_PublishRuntimeDir>
+      <_PublishRuntimeDir Condition="'$(_PublishLeafName)' != 'Runtime'">$(_PublishFullDir)\Runtime</_PublishRuntimeDir>
+      <_PublishAppRoot Condition="'$(_PublishLeafName)' == 'Runtime'">$([System.IO.Path]::GetDirectoryName('$(_PublishFullDir)'))</_PublishAppRoot>
+      <_PublishAppRoot Condition="'$(_PublishLeafName)' != 'Runtime'">$(_PublishFullDir)</_PublishAppRoot>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(_PublishLeafName)' != 'Runtime'">
+      <_LoosePublishedFiles Include="$(_PublishFullDir)\**\*.*"
+                            Exclude="$(_PublishFullDir)\Runtime\**\*.*;$(_PublishFullDir)\Data\**\*.*;$(_PublishFullDir)\Scripts\**\*.*;$(_PublishFullDir)\Config\**\*.*;$(_PublishFullDir)\Logs\**\*.*" />
+    </ItemGroup>
+    <MakeDir Directories="$(_PublishRuntimeDir)" />
+    <Move SourceFiles="@(_LoosePublishedFiles)"
+          DestinationFiles="@(_LoosePublishedFiles->'$(_PublishRuntimeDir)\%(RecursiveDir)%(Filename)%(Extension)')"
+          OverwriteReadOnlyFiles="true"
+          Condition="'$(_PublishLeafName)' != 'Runtime' and '@(_LoosePublishedFiles)' != ''" />
+    <CreateAppHost AppHostSourcePath="$(AppHostSourcePath)"
+                   AppHostDestinationPath="$(_PublishAppRoot)\$(AssemblyName).exe"
+                   AppBinaryName="Runtime/$(AssemblyName)$(TargetExt)"
+                   IntermediateAssembly="@(IntermediateAssembly->'%(FullPath)')"
+                   WindowsGraphicalUserInterface="$(_UseWindowsGraphicalUserInterface)"
+                   Retries="$(CopyRetryCount)"
+                   RetryDelayMilliseconds="$(CopyRetryDelayMilliseconds)"
+                   EnableMacOSCodeSign="$(_EnableMacOSCodeSign)"
+                   DisableCetCompat="$(_DisableCetCompat)" />
+    <Delete Files="$(_PublishRuntimeDir)\$(AssemblyName).exe"
+            Condition="Exists('$(_PublishRuntimeDir)\$(AssemblyName).exe')" />
+  </Target>
+
+  <!--
     JeekLauncherMcp is the Debug MCP stdio adapter (no product MCP surface exists yet, so
     Release builds skip it). Agents launch the fixed per-user copy under LocalAppData (via
-    the repo-root JeekLauncherDebugMcp.cmd); this publishes the side-by-side copy the app
-    installs there on startup. Renaming the old file first lets Windows replace an image an
-    agent still has running, instead of failing the build.
+    the repo-root JeekLauncherDebugMcp.cmd); this publishes the side-by-side copy inside
+    Runtime\ that the app installs there on startup. Renaming the old file first lets Windows
+    replace an image an agent still has running, instead of failing the build.
   -->
-  <Target Name="PublishJeekLauncherMcpAfterBuild" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug' and '$(_IsPublishing)' != 'true'">
+  <Target Name="PublishJeekLauncherMcpAfterBuild" AfterTargets="CreateNestedAppHostAfterBuild" Condition="'$(Configuration)' == 'Debug' and '$(_IsPublishing)' != 'true'">
     <CallTarget Targets="PublishJeekLauncherMcpCore" />
   </Target>
 
-  <Target Name="PublishJeekLauncherMcpAfterPublish" AfterTargets="Publish" Condition="'$(Configuration)' == 'Debug'">
+  <Target Name="PublishJeekLauncherMcpAfterPublish" AfterTargets="CreateNestedAppHostAfterPublish" Condition="'$(Configuration)' == 'Debug'">
     <PropertyGroup>
-      <_JeekLauncherMcpTargetDir>$(PublishDir)</_JeekLauncherMcpTargetDir>
+      <_JeekLauncherMcpTargetDir>$(_PublishRuntimeDir)</_JeekLauncherMcpTargetDir>
     </PropertyGroup>
     <CallTarget Targets="PublishJeekLauncherMcpCore" />
   </Target>
@@ -111,7 +135,6 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="ToolGood.Words.Pinyin" Version="3.1.0.4" />
     <PackageReference Include="Jeek.Avalonia.Localization" Version="12.0.2" />
-    <PackageReference Include="nulastudio.NetBeauty" Version="2.1.5" />
   </ItemGroup>
 
 </Project>

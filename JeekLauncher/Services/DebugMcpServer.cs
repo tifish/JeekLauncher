@@ -29,7 +29,7 @@ namespace JeekLauncher.Services;
 /// worktree's exe — and that adapter forwards stdio to this instance's named pipe. The pipe
 /// name carries the worktree's instance id, so parallel Debug builds never answer for each
 /// other and there is no port to collide over. Agents must not launch
-/// <c>bin\JeekLauncherMcp.exe</c> directly: that path is build output (installed to the fixed
+/// <c>bin\Runtime\JeekLauncherMcp.exe</c> directly: that path is build output (installed to the fixed
 /// path on startup) and holding it open would fail the next build.</para>
 /// </summary>
 internal static class DebugMcpServer
@@ -221,6 +221,8 @@ internal static class DebugMcpServer
         sb.AppendLine($"InstanceId: {instance.InstanceId}");
         sb.AppendLine($"InstanceLabel: {instance.InstanceLabel}");
         sb.AppendLine($"WorkspaceRoot: {instance.WorkspaceRoot}");
+        sb.AppendLine($"ProgramDir: {AppPaths.ProgramDir}");
+        sb.AppendLine($"RuntimeDir: {AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}");
         sb.AppendLine($"ProcessId: {instance.ProcessId}");
         sb.AppendLine($"ConfigRoot: {instance.ConfigRoot}");
         sb.AppendLine($"Process uptime: {DateTime.Now - Process.GetCurrentProcess().StartTime:hh\\:mm\\:ss}.");
@@ -542,6 +544,13 @@ internal static class DebugMcpServer
             sb.AppendLine($"customStorageDir={(local.CustomStorageDir.Length > 0 ? local.CustomStorageDir : "(none)")}");
             sb.AppendLine();
             sb.AppendLine("--- paths ---");
+            var languagesPath = Path.Combine(AppPaths.ProgramDir, "Data", "Languages.tab");
+            var updateScriptPath = Path.Combine(AppPaths.ProgramDir, "Scripts", "AutoUpdate.ps1");
+            sb.AppendLine($"executablePath={Environment.ProcessPath ?? ""}");
+            sb.AppendLine($"programDir={AppPaths.ProgramDir}");
+            sb.AppendLine($"runtimeDir={AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}");
+            sb.AppendLine($"languagesFile={languagesPath} exists={File.Exists(languagesPath)}");
+            sb.AppendLine($"updateScript={updateScriptPath} exists={File.Exists(updateScriptPath)}");
             sb.AppendLine($"machineName={Storage.MachineName}");
             sb.AppendLine($"roamableConfigDir={Storage.RoamableConfigDir}");
             sb.AppendLine($"settings={Storage.SettingsPath} exists={File.Exists(Storage.SettingsPath)}");

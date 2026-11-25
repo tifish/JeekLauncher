@@ -21,7 +21,7 @@
 
 Agents talk to a running instance over a Windows named pipe, never a TCP port — nothing to allocate, nothing to collide over, and access control is the pipe's own ACL rather than a URL token.
 
-- **Stable adapter path.** Agents launch this worktree's root `JeekLauncherDebugMcp.cmd`, which runs the fixed per-user `%LocalAppData%\JeekLauncher\Mcp\JeekLauncherMcp.exe`. Never launch `bin\JeekLauncherMcp.exe` directly: that file is build output which the app copies to the fixed path on startup, and an agent holding it open makes the next build fail. The install deliberately happens at app startup, not during the build.
+- **Stable adapter path.** Agents launch this worktree's root `JeekLauncherDebugMcp.cmd`, which runs the fixed per-user `%LocalAppData%\JeekLauncher\Mcp\JeekLauncherMcp.exe`. Never launch `bin\Runtime\JeekLauncherMcp.exe` directly: that file is build output which the app copies to the fixed path on startup, and an agent holding it open makes the next build fail. The install deliberately happens at app startup, not during the build.
 - **Debug routing.** `JeekLauncherDebugMcp.cmd` passes `--surface debug --app <this worktree\bin\JeekLauncher.exe>`. The adapter derives the worktree instance id from that app directory (or reads the HKCU registration), so parallel Debug worktrees never answer for each other. It reconnects on its own when the app restarts, so an app rebuild does not end the agent session.
 - **Debug builds only.** The host is compiled into every configuration but only listens under `#if DEBUG`. If tools report the app as unreachable, check that `bin\JeekLauncher.exe` is a Debug build and is running.
 - **Register a tool in two places.** The handler goes in `DebugMcpServer` (`AddTool`), the schema in `DebugMcpContract` (`BuildToolList`). A tool missing from the contract is invisible to clients even though its handler works.
@@ -32,6 +32,6 @@ Agents talk to a running instance over a Windows named pipe, never a TCP port �
 ## Layout
 
 - `JeekLauncher/` — the Avalonia app. `Services/` holds the non-UI logic (scanning, search, config, updates, MCP).
-- `Tools/JeekLauncherMcp/` — the stdio↔pipe MCP adapter, published beside the app. It links `McpPipeNames.cs` and `McpAdapterRegistry.cs` from the app so both ends derive the same pipe name.
+- `Tools/JeekLauncherMcp/` — the stdio↔pipe MCP adapter, published into `bin\Runtime\`. It links `McpPipeNames.cs` and `McpAdapterRegistry.cs` from the app so both ends derive the same pipe name.
 - `JeekTools.NET/` — shared library submodule. Use its components rather than reimplementing: `SettingsStorage` / `JsonSettingsFile` / `SharedDataFile` (config), `AutoUpdater` + `GitHubMirrors` (updates), `LogManager` (logging), `McpHost` / `ObjectGraph` (MCP).
-- `bin/` — the run/publish directory. Version-controlled runtime files (`Data/`, `*.ps1`, `*.cmd`) live here directly; build output does not.
+- `bin/` — the run/publish directory. Only `JeekLauncher.exe` stays at the root; managed/native binaries live in `Runtime/`, and version-controlled runtime files (`Data/`, `Scripts/`) live here directly.

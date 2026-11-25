@@ -1,3 +1,5 @@
+using JeekTools;
+
 namespace JeekLauncher.Services;
 
 public sealed record DebugInstanceInfo(
@@ -22,11 +24,11 @@ public static class DebugInstanceContext
 
     /// <summary>Repository root when running from <c>bin\</c> in Debug, otherwise the install folder.</summary>
     public static string WorkspaceRoot { get; } = IsDebugBuild
-        ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."))
-        : AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        ? Path.GetFullPath(Path.Combine(AppPaths.ProgramDir, ".."))
+        : AppPaths.ProgramDir;
 
     public static string InstanceId { get; } = IsDebugBuild
-        ? McpPipeNames.InstanceId(AppContext.BaseDirectory)
+        ? McpPipeNames.InstanceId(AppPaths.ProgramDir)
         : "release";
 
     public static string BranchLabel { get; }
@@ -51,8 +53,8 @@ public static class DebugInstanceContext
         ? $"JeekLauncher.Show.{InstanceId}"
         : "JeekLauncher.Show.{B3F9A2C1-7E54-4D8B-9A1F-6C2E0D5B8E11}";
 
-    /// <summary>Human-readable discovery file next to the executable. Not needed to connect
-    /// (the pipe name is derived), but handy when troubleshooting by hand.</summary>
+    /// <summary>Human-readable discovery file inside the runtime folder so the app root keeps only
+    /// the executable. Not needed to connect (the pipe name is derived), but handy when troubleshooting.</summary>
     public static string DiscoveryPath => Path.Combine(AppContext.BaseDirectory, "debug-mcp.json");
 
     private static string _mcpPipeName = "";

@@ -31,9 +31,9 @@ Thumbs.db
 *.selftest.txt
 
 # Build output lives under bin/, but the version-controlled runtime files
-# (scripts + Data) stay tracked — the app reads Data/Languages.tab next to the exe.
+# (Data + Scripts) stay tracked — only JeekLauncher.exe stays at the root of bin/.
 bin/*
-!bin/*.ps1
-!bin/*.cmd
 !bin/Data/
 !bin/Data/**
+!bin/Scripts/
+!bin/Scripts/**

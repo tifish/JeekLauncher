@@ -102,7 +102,7 @@ public partial class App : Application
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             Localizer.SetLocalizer(new TabLocalizer(
-                Path.Combine(AppContext.BaseDirectory, "Data", "Languages.tab")));
+                Path.Combine(AppPaths.ProgramDir, "Data", "Languages.tab")));
 
             // Machine-local settings first: they decide where roamable config is read from.
             _local = LocalSettings.Load();

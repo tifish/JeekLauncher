@@ -7,6 +7,6 @@ echo Installing .NET...
 powershell.exe -ExecutionPolicy Bypass -File "%~dp0dotnet-install.ps1" -Channel 10.0 -Runtime dotnet -Architecture x64
 
 echo Starting application...
-start "" "%~dp0JeekLauncher.exe"
+start "" "%~dp0..\JeekLauncher.exe"
 
 endlocal

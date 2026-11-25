@@ -10,7 +10,7 @@ if ($args.Count -eq 0) {
 }
 
 $stageDir = $args[0]
-$installDir = $PSScriptRoot
+$installDir = Split-Path -Parent $PSScriptRoot
 $exePath = Join-Path $installDir "$appName.exe"
 
 $Host.UI.RawUI.WindowTitle = "$appName Updater"
@@ -39,11 +39,15 @@ try {
     }
 
     Write-Host "[2/3] Installing files..."
-    # Preserve user data (portable Config, logs) and this script so it is not
-    # deleted mid-run. Matches install.ps1's robocopy /XD list.
-    $preserveNames = @("Config", "Logs", "AutoUpdate.ps1")
+    # Preserve user data (portable Config, logs) and the Scripts directory while this
+    # script is running. Matches install.ps1's robocopy /XD list.
+    $preserveNames = @("Config", "Logs", "Scripts")
     Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue |
     Where-Object { $preserveNames -notcontains $_.Name } |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+    Get-ChildItem -LiteralPath $PSScriptRoot -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ine "AutoUpdate.ps1" } |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
     Copy-Item -Path (Join-Path $stageDir "*") -Destination $installDir -Recurse -Force

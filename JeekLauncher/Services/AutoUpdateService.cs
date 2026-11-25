@@ -20,6 +20,7 @@ public static class AutoUpdateService
         AppExeName = AppExeName,
         ReleaseZipUrl = "https://github.com/tifish/JeekLauncher/releases/download/latest_release/JeekLauncher.zip",
         VersionTxtUrl = "https://github.com/tifish/JeekLauncher/releases/download/latest_release/version.txt",
+        UpdateScriptName = Path.Combine("Scripts", "AutoUpdate.ps1"),
         UserAgent = "JeekLauncher-Updater/1.0",
         // Debug instances never self-update. Release keeps downloads under LocalAppData
         // so a postponed install survives reboots and temp cleanups.
@@ -53,7 +54,7 @@ public static class AutoUpdateService
         CancellationToken cancellationToken = default)
         => Updater.DownloadAndStageAsync(null, progress, cancellationToken);
 
-    /// <summary>Hands the staged package to <c>AutoUpdate.ps1</c>, which swaps the files
+    /// <summary>Hands the staged package to <c>Scripts\AutoUpdate.ps1</c>, which swaps the files
     /// in once this process exits and restarts the app.</summary>
     public static bool LaunchInstall(string stagedPackageDir) => Updater.LaunchInstall(stagedPackageDir);
 }
