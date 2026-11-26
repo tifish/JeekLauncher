@@ -9,6 +9,10 @@ on:
 permissions:
     contents: write
 
+concurrency:
+    group: build-and-release-${{ github.ref }}
+    cancel-in-progress: false
+
 env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     RELEASE_TAG: "latest_release"
@@ -20,13 +24,13 @@ jobs:
 
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
               with:
                   fetch-depth: 0
                   submodules: recursive
 
             - name: Setup .NET
-              uses: actions/setup-dotnet@v4
+              uses: actions/setup-dotnet@v5
               with:
                   dotnet-version: 10.0.x
 
