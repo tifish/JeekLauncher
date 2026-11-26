@@ -45,6 +45,8 @@
     </PropertyGroup>
     <CreateAppHost AppHostSourcePath="$(AppHostSourcePath)"
                    AppHostDestinationPath="$(_NestedAppRoot)\$(AssemblyName).exe"
+                   DotNetSearchLocations="AppLocal;AppRelative;EnvironmentVariable;Global"
+                   AppRelativeDotNet="..\.dotnet"
                    AppBinaryName="$(_NestedRuntimeFolderName)/$(AssemblyName)$(TargetExt)"
                    IntermediateAssembly="@(IntermediateAssembly->'%(FullPath)')"
                    WindowsGraphicalUserInterface="$(_UseWindowsGraphicalUserInterface)"
@@ -79,6 +81,8 @@
           Condition="'$(_PublishLeafName)' != 'Runtime' and '@(_LoosePublishedFiles)' != ''" />
     <CreateAppHost AppHostSourcePath="$(AppHostSourcePath)"
                    AppHostDestinationPath="$(_PublishAppRoot)\$(AssemblyName).exe"
+                   DotNetSearchLocations="AppLocal;AppRelative;EnvironmentVariable;Global"
+                   AppRelativeDotNet="..\.dotnet"
                    AppBinaryName="Runtime/$(AssemblyName)$(TargetExt)"
                    IntermediateAssembly="@(IntermediateAssembly->'%(FullPath)')"
                    WindowsGraphicalUserInterface="$(_UseWindowsGraphicalUserInterface)"
@@ -97,20 +101,11 @@
     Runtime\ that the app installs there on startup. Renaming the old file first lets Windows
     replace an image an agent still has running, instead of failing the build.
   -->
-  <Target Name="PublishJeekLauncherMcpAfterBuild" AfterTargets="CreateNestedAppHostAfterBuild" Condition="'$(Configuration)' == 'Debug' and '$(_IsPublishing)' != 'true'">
-    <CallTarget Targets="PublishJeekLauncherMcpCore" />
-  </Target>
-
-  <Target Name="PublishJeekLauncherMcpAfterPublish" AfterTargets="CreateNestedAppHostAfterPublish" Condition="'$(Configuration)' == 'Debug'">
+  <Target Name="PublishJeekLauncherMcp" AfterTargets="CreateNestedAppHostAfterBuild;CreateNestedAppHostAfterPublish"
+          Condition="'$(Configuration)' == 'Debug' and '$(DesignTimeBuild)' != 'true' and ('$(_IsPublishing)' != 'true' or '$(_PublishRuntimeDir)' != '')">
     <PropertyGroup>
-      <_JeekLauncherMcpTargetDir>$(_PublishRuntimeDir)</_JeekLauncherMcpTargetDir>
-    </PropertyGroup>
-    <CallTarget Targets="PublishJeekLauncherMcpCore" />
-  </Target>
-
-  <Target Name="PublishJeekLauncherMcpCore">
-    <PropertyGroup>
-      <_JeekLauncherMcpTargetDir Condition="'$(_JeekLauncherMcpTargetDir)' == ''">$(OutDir)</_JeekLauncherMcpTargetDir>
+      <_JeekLauncherMcpTargetDir>$(OutDir)</_JeekLauncherMcpTargetDir>
+      <_JeekLauncherMcpTargetDir Condition="'$(_PublishRuntimeDir)' != ''">$(_PublishRuntimeDir)</_JeekLauncherMcpTargetDir>
       <JeekLauncherMcpDir>$([System.IO.Path]::GetFullPath('$(_JeekLauncherMcpTargetDir)', '$(MSBuildProjectDirectory)'))</JeekLauncherMcpDir>
       <_McpUnlockExe>$([System.IO.Path]::Combine('$(JeekLauncherMcpDir)', 'JeekLauncherMcp.exe'))</_McpUnlockExe>
       <_McpUnlockStamp>$([System.DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff'))</_McpUnlockStamp>

@@ -32,7 +32,7 @@ $AppName = 'JeekLauncher'
 $ExeName = "$AppName.exe"
 $ReleaseUrl = "https://github.com/tifish/$AppName/releases/latest/download/$AppName.zip"
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\$AppName"
-$UserDataDirs = @('Config', 'Logs')
+$UserDataDirs = @('Config', 'Logs', '.dotnet')
 
 # Mirrors, in the same order as JeekTools' GitHubMirrors.GetMirrors.
 function Get-Mirrors([string] $Url) {
@@ -109,7 +109,7 @@ function Invoke-MirrorDownload([string] $Url, [string] $Destination, [bool] $IsL
             }
         }
 
-        return ($received -gt 0)
+        return ($received -gt 0 -and ($total -lt 0 -or $received -eq $total))
     }
     catch {
         Write-Host "    $($_.Exception.Message)" -ForegroundColor Yellow
@@ -159,19 +159,18 @@ function Stop-InstalledInstance {
     }
 }
 
-function Test-DotnetRuntime {
-    $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
-    if (-not $dotnet) { return $false }
-
+function Test-DotnetRuntime([string] $ExePath) {
+    $previous = $env:DOTNET_DISABLE_GUI_ERRORS
     try {
-        $runtimes = & dotnet --list-runtimes 2>$null
+        $env:DOTNET_DISABLE_GUI_ERRORS = '1'
+        # Older packages recognize the headless language self-test. Giving them that
+        # fallback avoids opening a tray instance and waiting forever during rollout.
+        $probe = Start-Process -FilePath $ExePath -ArgumentList '--check-runtime --selftest lang' -Wait -PassThru
+        return $probe.ExitCode -eq 0
     }
-    catch {
-        return $false
+    finally {
+        $env:DOTNET_DISABLE_GUI_ERRORS = $previous
     }
-
-    # The app targets .NET 10 and Avalonia needs only the base runtime.
-    return [bool]($runtimes | Select-String -SimpleMatch 'Microsoft.NETCore.App 10.')
 }
 
 function New-StartMenuShortcut {
@@ -243,7 +242,7 @@ Write-Host "  $AppName installer" -ForegroundColor Green
 Write-Host "  target: $InstallDir"
 Write-Host ""
 
-$stage = Join-Path ([System.IO.Path]::GetTempPath()) "$AppName-install-$PID"
+$stage = Join-Path ([System.IO.Path]::GetTempPath()) "$AppName-install-$([guid]::NewGuid())"
 $zipPath = Join-Path $stage "$AppName.zip"
 $unpackDir = Join-Path $stage 'package'
 
@@ -255,8 +254,10 @@ try {
 
     Write-Step 'Extracting'
     Expand-Archive -LiteralPath $zipPath -DestinationPath $unpackDir -Force
-    if (-not (Test-Path -LiteralPath (Join-Path $unpackDir $ExeName))) {
-        throw "The downloaded package does not contain $ExeName."
+    foreach ($file in @($ExeName, "Runtime\$AppName.dll", "Runtime\$AppName.runtimeconfig.json", 'Scripts\Setup.cmd', 'Data\Languages.tab')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $unpackDir $file) -PathType Leaf)) {
+            throw "The downloaded package does not contain $file."
+        }
     }
 
     Write-Step 'Stopping any installed instance'
@@ -273,6 +274,15 @@ try {
         throw "Copying files failed (robocopy exit code $LASTEXITCODE)."
     }
 
+    $exePath = Join-Path $InstallDir $ExeName
+    if (-not (Test-DotnetRuntime $exePath)) {
+        $setupScript = Join-Path $InstallDir 'Scripts\Setup.cmd'
+        Write-Step 'Installing the private .NET 10 runtime'
+        & $setupScript --no-launch
+        if ($LASTEXITCODE -ne 0 -or -not (Test-DotnetRuntime $exePath)) {
+            throw 'The installed application could not load its runtime.'
+        }
+    }
     Write-Step 'Creating the Start Menu shortcut'
     $shortcut = New-StartMenuShortcut
     Write-Host "    $shortcut"
@@ -281,18 +291,7 @@ try {
         Write-Step 'Enabling start with Windows'
         Enable-AutoStart
     }
-
-    $exePath = Join-Path $InstallDir $ExeName
-    if (-not (Test-DotnetRuntime)) {
-        $setupScript = Join-Path $InstallDir 'Scripts\Setup.cmd'
-        if (-not (Test-Path -LiteralPath $setupScript)) {
-            $setupScript = Join-Path $InstallDir 'Setup.cmd'
-        }
-        Write-Step '.NET 10 runtime not found — running Setup.cmd'
-        # Setup.cmd installs the runtime (elevating if needed) and then starts the app.
-        Start-Process -FilePath $setupScript -WorkingDirectory $InstallDir
-    }
-    elseif (-not $NoLaunch) {
+    if (-not $NoLaunch) {
         Write-Step "Starting $AppName"
         Start-Process -FilePath $exePath -WorkingDirectory $InstallDir
     }

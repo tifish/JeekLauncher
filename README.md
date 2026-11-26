@@ -51,7 +51,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://ghfast.top/h
 ```powershell
 git clone --recursive https://github.com/tifish/JeekLauncher.git
 cd JeekLauncher
-.\\Run.cmd
+.\Run.cmd
 ```
 
 项目需求与核心机制说明见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)。

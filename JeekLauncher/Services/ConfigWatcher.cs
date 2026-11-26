@@ -86,7 +86,7 @@ internal sealed class ConfigWatcher : IDisposable
         catch { return ConfigChangeKind.None; }
 
         if (string.Equals(fullPath, _settingsPath, StringComparison.OrdinalIgnoreCase))
-            return Storage.IsRecentSelfWrite(ConfigChangeKind.Settings) ? ConfigChangeKind.None : ConfigChangeKind.Settings;
+            return Storage.IsRecentSelfWrite(ConfigChangeKind.Settings, fullPath) ? ConfigChangeKind.None : ConfigChangeKind.Settings;
 
         if (string.Equals(fullPath, _legacyQuickWordsPath, StringComparison.OrdinalIgnoreCase))
             return ConfigChangeKind.QuickWords;
@@ -98,7 +98,7 @@ internal sealed class ConfigWatcher : IDisposable
             if (changeType == WatcherChangeTypes.Changed)
                 return ConfigChangeKind.None;
 
-            return Storage.IsRecentSelfWrite(ConfigChangeKind.QuickWords) ? ConfigChangeKind.None : ConfigChangeKind.QuickWords;
+            return ConfigChangeKind.QuickWords;
         }
 
         string? parentDir = Path.GetDirectoryName(fullPath);
@@ -109,7 +109,7 @@ internal sealed class ConfigWatcher : IDisposable
             // Only suppress self-write for this machine's own shard; never suppress
             // another machine's shard arriving in the same window.
             if (string.Equals(fullPath, _ownQuickWordsPath, StringComparison.OrdinalIgnoreCase)
-                && Storage.IsRecentSelfWrite(ConfigChangeKind.QuickWords))
+                && Storage.IsRecentSelfWrite(ConfigChangeKind.QuickWords, fullPath))
             {
                 return ConfigChangeKind.None;
             }

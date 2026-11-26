@@ -78,6 +78,24 @@ public static class Storage
         CustomDir = customDir ?? "";
     }
 
+    internal static bool IsValidCustomDirectory(string? customDir)
+    {
+        if (string.IsNullOrWhiteSpace(customDir) || !Path.IsPathFullyQualified(customDir))
+            return false;
+        try
+        {
+            string root = NormalizePath(ConfigRootFor(StorageLocation.CustomDirectory, customDir));
+            string local = NormalizePath(LocalConfigDir);
+            return !string.Equals(root, local, StringComparison.OrdinalIgnoreCase)
+                && !root.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                && !local.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Whether switching would place the new Config directory inside the current one.</summary>
     public static bool WouldMoveRoamableConfigIntoItself(StorageLocation newLocation, string? newCustomDir)
     {
@@ -103,6 +121,8 @@ public static class Storage
     /// </summary>
     public static void SwitchLocation(StorageLocation newLocation, string? newCustomDir, bool moveFiles)
     {
+        if (newLocation == StorageLocation.CustomDirectory && !IsValidCustomDirectory(newCustomDir))
+            throw new InvalidOperationException("Invalid custom configuration directory.");
         if (WouldMoveRoamableConfigIntoItself(newLocation, newCustomDir))
             throw new InvalidOperationException("The new Config directory cannot be inside the current one.");
 
@@ -111,46 +131,40 @@ public static class Storage
         bool leavingPortable = EffectiveLocation == StorageLocation.ProgramDirectory
                                && newLocation != StorageLocation.ProgramDirectory;
 
-        if (moveFiles)
+        if (moveFiles || leavingPortable)
             SettingsStorage.MoveConfigRoot(from, to);
         else
             Directory.CreateDirectory(to);
 
-        // The executable-side folder is what forces portable mode, so it has to go even
-        // when MoveConfigRoot already emptied it.
-        if (leavingPortable)
-            Backing.TryDeleteProgramConfig(out _);
-
         SetLocation(newLocation, newCustomDir);
     }
 
-    private static long _lastSettingsSelfWriteTimestamp;
-    private static long _lastQuickWordsSelfWriteTimestamp;
-    private static readonly TimeSpan SelfWriteSuppressionWindow = TimeSpan.FromSeconds(2);
+    private sealed record SelfWrite(string Path, string Contents, long Timestamp);
+    private static SelfWrite? _lastSettingsWrite;
+    private static SelfWrite? _lastQuickWordsWrite;
 
-    internal static void MarkSelfWrite(ConfigChangeKind kind)
+    internal static void MarkSelfWrite(ConfigChangeKind kind, string path, string contents)
     {
-        long now = Stopwatch.GetTimestamp();
-        if (kind.HasFlag(ConfigChangeKind.Settings))
-            Volatile.Write(ref _lastSettingsSelfWriteTimestamp, now);
-        if (kind.HasFlag(ConfigChangeKind.QuickWords))
-            Volatile.Write(ref _lastQuickWordsSelfWriteTimestamp, now);
+        var write = new SelfWrite(path, contents, Stopwatch.GetTimestamp());
+        if (kind == ConfigChangeKind.Settings)
+            Volatile.Write(ref _lastSettingsWrite, write);
+        else
+            Volatile.Write(ref _lastQuickWordsWrite, write);
     }
 
-    internal static bool IsRecentSelfWrite(ConfigChangeKind kind)
+    internal static bool IsRecentSelfWrite(ConfigChangeKind kind, string path)
     {
-        long stamp = kind switch
-        {
-            ConfigChangeKind.Settings => Volatile.Read(ref _lastSettingsSelfWriteTimestamp),
-            ConfigChangeKind.QuickWords => Volatile.Read(ref _lastQuickWordsSelfWriteTimestamp),
-            _ => 0,
-        };
-        return stamp != 0 && Stopwatch.GetElapsedTime(stamp) <= SelfWriteSuppressionWindow;
+        var write = kind == ConfigChangeKind.Settings
+            ? Volatile.Read(ref _lastSettingsWrite) : Volatile.Read(ref _lastQuickWordsWrite);
+        if (write is null || !string.Equals(write.Path, path, StringComparison.OrdinalIgnoreCase)
+            || Stopwatch.GetElapsedTime(write.Timestamp) > TimeSpan.FromSeconds(2))
+            return false;
+        try { return File.ReadAllText(path) == write.Contents; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
     }
 
-    public static void EnsureLocalConfigDir() => Directory.CreateDirectory(LocalConfigDir);
     public static void EnsureRoamableConfigDir() => Directory.CreateDirectory(RoamableConfigDir);
-    public static void EnsureQuickWordsDir() => Directory.CreateDirectory(QuickWordsDir);
 
     private static string NormalizePath(string path)
         => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -179,14 +193,16 @@ public sealed class AppSettings
     /// instance's edits when this one saves.</summary>
     private AppSettings? _baseline;
 
-    public static AppSettings Load()
+    public static AppSettings Load(AppSettings? lastReadable = null)
     {
         bool existed = JsonSettingsFile.TryLoad(Storage.SettingsPath, out AppSettings settings);
+        if (!existed && lastReadable is not null && File.Exists(Storage.SettingsPath))
+            return lastReadable;
         Normalize(settings);
         settings._baseline = JsonSettingsFile.Clone(settings);
 
         // Write the defaults out on first run so the file is there to be found and edited.
-        if (!existed)
+        if (!existed && !File.Exists(Storage.SettingsPath))
             settings.Save(forceAllLocal: true);
 
         return settings;
@@ -196,12 +212,10 @@ public sealed class AppSettings
     /// right after a storage switch, where the destination is a different folder.</param>
     public void Save(bool forceAllLocal = false)
     {
-        Storage.EnsureRoamableConfigDir();
-        Storage.MarkSelfWrite(ConfigChangeKind.Settings);
         if (JsonSettingsFile.TryMergeAndWrite(
                 Storage.SettingsPath, _baseline ?? new AppSettings(), this, Normalize, forceAllLocal, out var merged))
         {
-            Storage.MarkSelfWrite(ConfigChangeKind.Settings);
+            Storage.MarkSelfWrite(ConfigChangeKind.Settings, Storage.SettingsPath, JsonSettingsFile.Serialize(merged));
             CopyFrom(merged);
             _baseline = JsonSettingsFile.Clone(merged);
         }
@@ -261,7 +275,7 @@ public sealed class LocalSettings
 
         // First run, or a migration from the old LocalSettings.json: persist right away so
         // the migrated values survive even if the user never opens the settings window.
-        if (!existed)
+        if (!existed && !File.Exists(Storage.LocalSettingsPath))
             settings.Save();
 
         return settings;
@@ -324,7 +338,6 @@ public sealed class LocalSettings
 
     public void Save()
     {
-        Storage.EnsureLocalConfigDir();
         if (JsonSettingsFile.TryMergeAndWrite(
                 Storage.LocalSettingsPath, _baseline ?? new LocalSettings(), this, Normalize, false, out var merged))
         {
@@ -363,13 +376,14 @@ public sealed class LocalSettings
             ? settings.StorageLocation
             : StorageLocation.UserDirectory;
 
+        settings.CustomStorageDir ??= "";
         if (settings.StorageLocation == StorageLocation.CustomDirectory
-            && !Path.IsPathFullyQualified(settings.CustomStorageDir))
+            && !Storage.IsValidCustomDirectory(settings.CustomStorageDir))
         {
             settings.StorageLocation = StorageLocation.UserDirectory;
         }
 
-        settings.ScanDirectories = settings.ScanDirectories
+        settings.ScanDirectories = (settings.ScanDirectories ?? [])
             .Where(dir => !string.IsNullOrWhiteSpace(dir))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -389,28 +403,34 @@ public sealed class UsageStore
     /// <summary>Record a launch by bumping the item's count.</summary>
     public void Record(string id)
     {
-        Counts[id] = GetCount(id) + 1;
-        _pendingDeltas[id] = (_pendingDeltas.TryGetValue(id, out int delta) ? delta : 0) + 1;
+        Counts[id] = AddLaunches(GetCount(id), 1);
+        _pendingDeltas[id] = AddLaunches(_pendingDeltas.GetValueOrDefault(id), 1);
     }
 
-    public static UsageStore Load()
+    public static UsageStore Load() => LoadFrom(Storage.UsagePath);
+
+    internal static UsageStore LoadFrom(string path)
     {
-        JsonSettingsFile.TryLoad(Storage.UsagePath, out UsageStore store);
-        store.Counts = new Dictionary<string, int>(store.Counts, StringComparer.OrdinalIgnoreCase);
+        JsonSettingsFile.TryLoad(path, out UsageStore store);
+        store.Counts = NormalizeCounts(store.Counts);
         return store;
     }
 
-    public void Save()
+    public void Save() => SaveTo(Storage.UsagePath);
+
+    internal void SaveTo(string path)
     {
+        if (_pendingDeltas.Count == 0)
+            return;
+
         try
         {
-            Storage.EnsureLocalConfigDir();
-            using var lease = SharedDataFile.Acquire(Storage.UsagePath);
-            if (_pendingDeltas.Count > 0 && JsonSettingsFile.TryLoad(Storage.UsagePath, out UsageStore disk))
+            using var lease = SharedDataFile.Acquire(path);
+            if (JsonSettingsFile.TryLoad(path, out UsageStore disk))
             {
-                var merged = new Dictionary<string, int>(disk.Counts, StringComparer.OrdinalIgnoreCase);
+                var merged = NormalizeCounts(disk.Counts);
                 foreach (var (id, delta) in _pendingDeltas)
-                    merged[id] = (merged.TryGetValue(id, out int existing) ? existing : 0) + delta;
+                    merged[id] = AddLaunches(merged.GetValueOrDefault(id), delta);
                 foreach (var (id, count) in Counts)
                 {
                     if (!merged.ContainsKey(id))
@@ -418,13 +438,29 @@ public sealed class UsageStore
                 }
                 Counts = merged;
             }
+            else if (File.Exists(path))
+            {
+                return; // Keep pending launches for a retry after the file becomes readable.
+            }
 
-            SharedDataFile.WriteAllTextAtomic(Storage.UsagePath, JsonSettingsFile.Serialize(this));
+            SharedDataFile.WriteAllTextAtomic(path, JsonSettingsFile.Serialize(this));
             _pendingDeltas.Clear();
         }
         catch
         {
             // Saving usage is best-effort.
         }
+    }
+
+    private static int AddLaunches(int count, int delta) =>
+        (int)Math.Min(int.MaxValue, (long)count + delta);
+
+    private static Dictionary<string, int> NormalizeCounts(Dictionary<string, int>? counts)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (counts is not null)
+            foreach (var (id, count) in counts)
+                result[id] = Math.Max(result.GetValueOrDefault(id), count);
+        return result;
     }
 }

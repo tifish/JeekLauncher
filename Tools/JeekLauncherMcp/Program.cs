@@ -52,7 +52,8 @@ while (await stdin.ReadLineAsync().ConfigureAwait(false) is { } line)
 async Task HandleAsync(JsonNode message)
 {
     var envelope = message as JsonObject;
-    var method = envelope?["method"]?.GetValue<string>();
+    var method = envelope?["method"] is JsonValue value && value.TryGetValue<string>(out var name)
+        ? name : null;
     var id = envelope?["id"]?.DeepClone();
 
     // Only a real tool call is worth starting the app for: MCP clients open stdio servers
@@ -66,9 +67,16 @@ async Task HandleAsync(JsonNode message)
             .SendAsync(message, AdapterText.ExpectsResponse(message), mayLaunch)
             .ConfigureAwait(false);
     }
+    catch (RequestDeliveryException ex)
+    {
+        if (AdapterText.ExpectsResponse(message))
+            await stdout.WriteLineAsync(AdapterText.RpcError(id, -32603, ex.Message).ToJsonString()).ConfigureAwait(false);
+        return;
+    }
     catch (Exception ex)
     {
-        await stdout.WriteLineAsync(OfflineResponse(method, id, ex.Message).ToJsonString()).ConfigureAwait(false);
+        if (AdapterText.ExpectsResponse(message))
+            await stdout.WriteLineAsync(OfflineResponse(method, id, ex.Message).ToJsonString()).ConfigureAwait(false);
         return;
     }
 
@@ -250,6 +258,9 @@ internal sealed record AdapterOptions(
     }
 }
 
+internal sealed class RequestDeliveryException(Exception cause)
+    : IOException("The pipe closed during the request. Its outcome is unknown.", cause);
+
 /// <summary>Lazily connected, self-healing named pipe client.</summary>
 internal sealed class PipeConnection(AdapterOptions options) : IDisposable
 {
@@ -259,38 +270,29 @@ internal sealed class PipeConnection(AdapterOptions options) : IDisposable
 
     /// <summary>
     /// Forwards one message and returns the matching response line, or null when the
-    /// message was a notification. Retries once on a broken pipe so an app restart does not
-    /// end the agent's session.
+    /// message was a notification. A broken pipe is reopened for the next message.
     /// </summary>
     public async Task<string?> SendAsync(JsonNode message, bool expectsResponse, bool mayLaunch)
     {
         var payload = message.ToJsonString();
-        for (var attempt = 0; ; attempt++)
+        var (reader, writer) = await ConnectAsync(mayLaunch).ConfigureAwait(false);
+        try
         {
-            try
-            {
-                var (reader, writer) = await ConnectAsync(mayLaunch).ConfigureAwait(false);
-                await writer.WriteLineAsync(payload).ConfigureAwait(false);
-                if (!expectsResponse)
-                    return null;
+            await writer.WriteLineAsync(payload).ConfigureAwait(false);
+            if (!expectsResponse)
+                return null;
 
-                // Skip server-initiated notifications so they cannot be mistaken for the
-                // reply to this request (the pipe is duplex; the app may push later).
-                while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
-                {
-                    if (line.Length == 0)
-                        continue;
-                    if (IsServerNotification(line))
-                        continue;
+            while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
+            {
+                if (line.Length > 0 && !IsServerNotification(line))
                     return line;
-                }
-
-                throw new IOException("The app closed the pipe before replying.");
             }
-            catch (Exception) when (attempt == 0)
-            {
-                Reset();
-            }
+            throw new EndOfStreamException();
+        }
+        catch (IOException ex)
+        {
+            Reset();
+            throw new RequestDeliveryException(ex);
         }
     }
 

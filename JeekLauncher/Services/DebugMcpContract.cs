@@ -97,6 +97,7 @@ public static class DebugMcpContract
                 ["limit"] = Prop("integer", "Maximum entries to list, 1-100 (default 20)."),
             }),
         Tool("rescan", "Rescan the shortcut directories and wait for the new catalog, as the tray 'Rescan' item does.", new()),
+        Tool("storage_probe", "Check usage merging, quick-word recovery, config separation and ranking with temporary data.", new()),
         Tool("config_state",
             "Report the resolved config layout: effective storage location, whether portable is forced, every config/update path, and the current settings values.",
             new()),

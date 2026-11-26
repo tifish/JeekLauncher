@@ -44,4 +44,4 @@ JeekLauncher 是 Windows 键盘优先应用启动器。程序常驻系统托盘�
 
 ## 相关说明
 
-安装、操作步骤和配置文件示例见根目录 [README.md](../README.md)。
+安装、操作步骤和源码运行说明见根目录 [README.md](../README.md)。

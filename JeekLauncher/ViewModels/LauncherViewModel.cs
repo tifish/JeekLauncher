@@ -15,6 +15,7 @@ public sealed class LauncherViewModel : INotifyPropertyChanged
 
     private string _query = string.Empty;
     private int _selectedIndex = -1;
+    private bool _hasScanned;
 
     public LauncherViewModel(UsageStore usage, QuickWordStore quickWords)
     {
@@ -65,6 +66,7 @@ public sealed class LauncherViewModel : INotifyPropertyChanged
     public void SetEntries(IReadOnlyList<AppEntry> entries)
     {
         _all = entries;
+        _hasScanned = true;
         Refresh();
     }
 
@@ -87,7 +89,7 @@ public sealed class LauncherViewModel : INotifyPropertyChanged
 
         SelectedIndex = Results.Count > 0 ? 0 : -1;
 
-        StatusText = _all.Count == 0
+        StatusText = !_hasScanned
             ? Localizer.Get("StatusScanning")
             : Results.Count == 0
                 ? Localizer.Get("StatusNoMatches")

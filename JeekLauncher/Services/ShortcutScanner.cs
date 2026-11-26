@@ -46,7 +46,7 @@ public static class ShortcutScanner
     public static List<AppEntry> Scan(IEnumerable<string> customDirectories)
     {
         var entries = new List<AppEntry>();
-        var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenTargets = new HashSet<string>(StringComparer.Ordinal);
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var activeIconKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -137,11 +137,9 @@ public static class ShortcutScanner
         // De-duplicate by resolved (target, arguments) before extracting icons or computing pinyin:
         // identical shortcuts across all-users + current-user Start Menu merge, while shortcuts
         // targeting the same host exe with distinct arguments (e.g. PWAs, dev prompts) stay separate.
-        string dedupKey = target is null
-            ? file
-            : linkInfo.Arguments is { Length: > 0 } args
-                ? $"{target}\0{args}"
-                : target;
+        string dedupKey = (target ?? file).ToUpperInvariant();
+        if (linkInfo.Arguments is { Length: > 0 } args)
+            dedupKey += "\0" + args; // arguments (e.g. URL paths) can be case-sensitive
         if (!seenTargets.Add(dedupKey))
             return null;
 

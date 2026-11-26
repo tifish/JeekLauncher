@@ -20,9 +20,6 @@ namespace JeekLauncher.Services;
 /// </summary>
 public static class SearchEngine
 {
-    private const long TierUnit = 10_000_000;
-    private const long LearnedBoost = 1_000_000_000;
-
     public static List<AppEntry> Search(string rawQuery, IReadOnlyList<AppEntry> all, UsageStore usage, QuickWordStore quickWords, int limit = 40)
     {
         string query = rawQuery.Trim().ToLowerInvariant();
@@ -40,7 +37,7 @@ public static class SearchEngine
         string normalizedQuery = InitialsHelper.Normalize(query);
         string? learnedId = quickWords.GetTarget(query);
 
-        var scored = new List<(AppEntry Entry, long Score)>();
+        var scored = new List<(AppEntry Entry, bool Learned, int Tier, int Count)>();
         foreach (var entry in all)
         {
             int tier = MatchTier(normalizedQuery, entry);
@@ -49,17 +46,14 @@ public static class SearchEngine
             if (tier == 0 && !isLearned)
                 continue;
 
-            long score = (long)tier * TierUnit;
-            if (isLearned)
-                score += LearnedBoost;                              // remembered word floats to the top
-            score += Math.Min(usage.GetCount(entry.Id), 100) * 1000L; // frequency orders within a tier
-            score += Math.Max(0, 64 - entry.Name.Length);             // gentle nudge for shorter names
-
-            scored.Add((entry, score));
+            scored.Add((entry, isLearned, tier, usage.GetCount(entry.Id)));
         }
 
         return scored
-            .OrderByDescending(t => t.Score)
+            .OrderByDescending(t => t.Learned)
+            .ThenByDescending(t => t.Tier)
+            .ThenByDescending(t => t.Count)
+            .ThenBy(t => Math.Min(64, t.Entry.Name.Length))
             .ThenBy(t => t.Entry.Name, StringComparer.OrdinalIgnoreCase)
             .Take(limit)
             .Select(t => t.Entry)
@@ -67,7 +61,7 @@ public static class SearchEngine
     }
 
     /// <summary>Returns the match tier (6 best … 1 worst), or 0 for no match.</summary>
-    private static int MatchTier(string q, AppEntry e)
+    internal static int MatchTier(string q, AppEntry e)
     {
         string initials = e.Initials;
         if (initials.Length > 0)

@@ -27,7 +27,7 @@ StorageModeHint	Where roamable settings (hotkey, language, quick words) are stor
 CustomDirWatermark	choose a folder (a "Config" subfolder is created inside)…	选择目录（将在其中创建 “Config” 子目录）…
 Browse	Browse…	浏览…
 CustomDirRequired	Please choose a valid custom folder for storage.	请为自定义存储选择一个有效的目录。
-MoveConfigQuestion	Move the existing settings files from "{0}" to the new location "{1}"? Choosing "Don't move" starts fresh at the new location and leaves the old files where they are.	是否将现有设置文件从“{0}”移动到新位置“{1}”？选择“不移动”将在新位置重新开始，原文件保持不变。
+MoveConfigQuestion	Move the existing settings files from "{0}" to "{1}"? Choosing "Don't move" keeps the original files and carries the current settings and quick words to the new location.	是否将现有设置文件从“{0}”移动到“{1}”？选择“不移动”会保留原文件，并将当前设置和快捷词带到新位置。
 MoveConfigRequired	Leaving portable mode deletes the Config folder next to the program, so the settings must be moved from "{0}" to "{1}". Continue?	退出便携模式会删除程序目录下的 Config 目录，因此设置必须从“{0}”移动到“{1}”。是否继续？
 MoveConfigMove	Move	移动
 MoveConfigKeep	Don't move	不移动

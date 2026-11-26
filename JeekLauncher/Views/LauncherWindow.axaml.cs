@@ -15,9 +15,6 @@ public partial class LauncherWindow : Window
     /// <summary>Raised when the window should be dismissed (Esc / focus lost).</summary>
     public event Action? HideRequested;
 
-    /// <summary>Raised when the user binds a quick word to an app and launches it.</summary>
-    public event Action<AppEntry, string>? QuickWordSetRequested;
-
     private bool _editingQuickWord;
     private AppEntry? _quickWordTarget;
 
@@ -152,7 +149,7 @@ public partial class LauncherWindow : Window
         CloseQuickWordEditor();
 
         if (entry is not null && word.Length > 0)
-            QuickWordSetRequested?.Invoke(entry, word);
+            LaunchRequested?.Invoke(entry, word);
         else
             SearchBox.Focus();
     }

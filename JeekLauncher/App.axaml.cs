@@ -50,7 +50,9 @@ public partial class App : Application
     private bool _initialized;
     private DispatcherTimer? _updateTimer;
     private int _updateInProgress;
-    private int _scanVersion;
+    private bool _scanning;
+    private bool _rescanPending;
+    private TaskCompletionSource? _scanWaiter;
 
     private static readonly ILogger Log = LogManager.CreateLogger(nameof(App));
 
@@ -71,6 +73,7 @@ public partial class App : Application
 
     /// <summary>Hotkey text that failed to register, or null when the hotkey is held.</summary>
     internal string? DebugHotkeyFailure => _hotkeyFailedText;
+    internal bool DebugHotkeyRegistered => _hotKey.IsRegistered;
 
     internal void DebugShowLauncher() => ShowLauncher();
 
@@ -79,10 +82,10 @@ public partial class App : Application
     internal void DebugReloadQuickWords()
     {
         _quickWords.ReloadFromDisk();
-        DebugRefreshQuickWordsUi();
+        RefreshQuickWordsUi();
     }
 
-    internal void DebugRefreshQuickWordsUi()
+    internal void RefreshQuickWordsUi()
     {
         _quickWordsWindow?.Reload();
         _viewModel.Refresh();
@@ -91,8 +94,8 @@ public partial class App : Application
     /// <summary>Rescans the shortcut directories and completes once the catalog is replaced.</summary>
     internal Task DebugRescanAsync()
     {
-        var completion = new TaskCompletionSource();
-        RescanFromDisk(() => completion.TrySetResult());
+        var completion = _scanWaiter ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        RescanFromDisk();
         return completion.Task;
     }
 
@@ -127,7 +130,6 @@ public partial class App : Application
 
             _window = new LauncherWindow(_viewModel);
             _window.LaunchRequested += OnLaunchRequested;
-            _window.QuickWordSetRequested += OnQuickWordSetRequested;
             _window.HideRequested += HideLauncher;
             _window.Opened += OnWindowFirstOpened;
 
@@ -236,27 +238,8 @@ public partial class App : Application
         // Remember the quick word so this query jumps to the top next time.
         _usage.Record(entry.Id);
         _usage.Save();
-        if (_quickWords.Set(query, entry.Id))
-        {
-            _quickWords.Save();
-            _quickWordsWindow?.Reload();
-        }
-    }
-
-    // Bind an explicit quick word to an app, then launch it.
-    private void OnQuickWordSetRequested(AppEntry entry, string word)
-    {
-        string w = word.Trim().ToLowerInvariant();
-        if (w.Length == 0)
-            return;
-
-        if (!LaunchEntry(entry))
-            return;
-
-        // Bump the launch count and bind the explicit quick word to the app.
-        _usage.Record(entry.Id);
-        _usage.Save();
-        if (_quickWords.Set(w, entry.Id))
+        _quickWords.Set(query, entry.Id);
+        if (_quickWords.HasPendingEdits)
         {
             _quickWords.Save();
             _quickWordsWindow?.Reload();
@@ -295,24 +278,30 @@ public partial class App : Application
 
     // ---- Scanning ----------------------------------------------------------
 
-    /// <param name="onCompleted">Runs on the UI thread once the new catalog is in place.</param>
-    private void StartScan(Action? onCompleted = null)
+    private void StartScan()
     {
-        int version = Interlocked.Increment(ref _scanVersion);
+        if (_scanning)
+        {
+            _rescanPending = true;
+            return;
+        }
+
+        _scanning = true;
+        var completion = _scanWaiter;
+        _scanWaiter = null;
         var dirs = _local.ScanDirectories.ToArray();
         var thread = new Thread(() =>
         {
-            var entries = ShortcutScanner.Scan(dirs);
-            Dispatcher.UIThread.Post(() =>
+            try
             {
-                if (version == Volatile.Read(ref _scanVersion))
-                {
-                    _entries = entries;
-                    _viewModel.SetEntries(entries);
-                    _quickWordsWindow?.Reload();
-                }
-                onCompleted?.Invoke();
-            });
+                var entries = ShortcutScanner.Scan(dirs);
+                Dispatcher.UIThread.Post(() => FinishScan(entries, null));
+            }
+            catch (Exception ex)
+            {
+                Log.ZLogWarning($"Shortcut scan failed: {ex.Message}");
+                Dispatcher.UIThread.Post(() => FinishScan(null, ex));
+            }
         })
         {
             IsBackground = true,
@@ -320,6 +309,28 @@ public partial class App : Application
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
+
+        void FinishScan(List<AppEntry>? entries, Exception? error)
+        {
+            _scanning = false;
+            if (error is not null)
+                completion?.TrySetException(error);
+            else if (!dirs.SequenceEqual(_local.ScanDirectories, StringComparer.OrdinalIgnoreCase))
+                completion?.TrySetCanceled(); // A different directory set is already queued.
+            else if (entries is not null)
+            {
+                _entries = entries;
+                _viewModel.SetEntries(entries);
+                _quickWordsWindow?.Reload();
+                completion?.TrySetResult();
+            }
+
+            if (_rescanPending)
+            {
+                _rescanPending = false;
+                StartScan();
+            }
+        }
     }
 
     // ---- Directory monitoring ----------------------------------------------
@@ -344,7 +355,7 @@ public partial class App : Application
     {
         if (changes.HasFlag(ConfigChangeKind.Settings))
         {
-            _settings = AppSettings.Load();
+            _settings = AppSettings.Load(_settings);
             ApplyLanguage(_settings.Language);
             ApplyTheme(_settings.Theme);
             RestartUpdateTimer();
@@ -383,10 +394,11 @@ public partial class App : Application
             // existing machine shards at the destination.
             _settings.Save(forceAllLocal: true);
             _quickWords.SyncWithCurrentLocation();
-            _quickWordsWindow?.Reload();
-            _viewModel.Refresh();
         }
+        else
+            _quickWords.ReloadFromDisk(); // The destination can already contain other machines' shards.
 
+        RefreshQuickWordsUi();
         _configWatcher?.Watch(Storage.RoamableConfigDir);
     }
 
@@ -437,12 +449,12 @@ public partial class App : Application
         return item;
     }
 
-    private void RescanFromDisk(Action? onCompleted = null)
+    private void RescanFromDisk()
     {
         // Reload local settings (scan dirs may have been hand-edited) then rescan + re-watch.
         _local = LocalSettings.Load();
         _watcher?.Watch(ShortcutScanner.GetDirectories(_local.ScanDirectories));
-        StartScan(onCompleted);
+        StartScan();
     }
 
     // ---- Settings & quick-string windows -----------------------------------
@@ -524,6 +536,7 @@ public partial class App : Application
         // Mutate the loaded instances in place so their merge baselines stay intact —
         // otherwise changing a setting back to its default would be discarded by the
         // three-way merge in JsonSettingsFile.
+        var previousDirs = _local.ScanDirectories;
         _settings.ApplyFrom(newSettings);
         _local.ApplyFrom(newLocal);
         _settings.Save();
@@ -537,8 +550,11 @@ public partial class App : Application
         BuildTrayMenu(); // refresh tooltip (and labels, if language was unchanged)
 
         // Re-watch the new directory set and rescan.
-        _watcher?.Watch(ShortcutScanner.GetDirectories(_local.ScanDirectories));
-        StartScan();
+        if (!previousDirs.SequenceEqual(_local.ScanDirectories, StringComparer.OrdinalIgnoreCase))
+        {
+            _watcher?.Watch(ShortcutScanner.GetDirectories(_local.ScanDirectories));
+            StartScan();
+        }
 
         return true;
     }

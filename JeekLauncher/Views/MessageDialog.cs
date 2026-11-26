@@ -21,21 +21,21 @@ public static class MessageDialog
 
     /// <summary>Shows a confirm dialog; the task is true if the primary button was clicked.</summary>
     public static async Task<bool> ShowConfirmAsync(string title, string message,
-        string confirmText, string cancelText, WindowIcon? icon = null)
-        => await ShowAsync(title, message, confirmText, null, cancelText, icon) == true;
+        string confirmText, string cancelText, WindowIcon? icon = null, Window? owner = null)
+        => await ShowAsync(title, message, confirmText, null, cancelText, icon, owner) == true;
 
     /// <summary>
     /// Shows a three-way choice dialog: primary returns <c>true</c>, secondary returns
     /// <c>false</c>, and cancel or closing the window returns <c>null</c>.
     /// </summary>
     public static Task<bool?> ShowChoiceAsync(string title, string message,
-        string primaryText, string secondaryText, string cancelText, WindowIcon? icon = null)
-        => ShowAsync(title, message, primaryText, secondaryText, cancelText, icon);
+        string primaryText, string secondaryText, string cancelText, WindowIcon? icon = null, Window? owner = null)
+        => ShowAsync(title, message, primaryText, secondaryText, cancelText, icon, owner);
 
     private static Task<bool?> ShowAsync(string title, string message,
-        string primaryText, string? secondaryText, string? cancelText, WindowIcon? icon)
+        string primaryText, string? secondaryText, string? cancelText, WindowIcon? icon, Window? owner = null)
     {
-        var tcs = new TaskCompletionSource<bool?>();
+        var tcs = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var window = new Window
         {
@@ -85,7 +85,10 @@ public static class MessageDialog
 
         // Closing via the title bar (no button) cancels the dialog.
         window.Closed += (_, _) => tcs.TrySetResult(null);
-        window.Show();
+        if (owner is null)
+            window.Show();
+        else
+            _ = window.ShowDialog(owner);
         window.Activate();
         return tcs.Task;
     }

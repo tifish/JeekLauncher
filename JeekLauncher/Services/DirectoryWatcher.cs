@@ -36,53 +36,34 @@ internal sealed class DirectoryWatcher : IDisposable
             if (!Directory.Exists(dir))
                 continue;
 
-            try
-            {
-                var watcher = new FileSystemWatcher(dir)
-                {
-                    IncludeSubdirectories = true,
-                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName,
-                };
-                watcher.Created += OnFileEvent;
-                watcher.Deleted += OnFileEvent;
-                watcher.Renamed += OnRenamed;
-                watcher.Error += OnError;
-                watcher.EnableRaisingEvents = true;
-                _watchers.Add(watcher);
-            }
-            catch
-            {
-                // A directory may be inaccessible; just skip watching it.
-            }
+            AddWatcher(dir, NotifyFilters.DirectoryName);
+            AddWatcher(dir, NotifyFilters.FileName | NotifyFilters.LastWrite, "*.lnk", "*.url");
         }
     }
 
-    private void OnFileEvent(object sender, FileSystemEventArgs e)
+    private void AddWatcher(string dir, NotifyFilters events, params string[] filters)
     {
-        if (IsRelevant(e.FullPath))
-            ScheduleRefresh();
+        FileSystemWatcher? watcher = null;
+        try
+        {
+            watcher = new FileSystemWatcher(dir) { IncludeSubdirectories = true, NotifyFilter = events };
+            foreach (var filter in filters)
+                watcher.Filters.Add(filter);
+            watcher.Created += OnChange;
+            watcher.Deleted += OnChange;
+            watcher.Renamed += OnChange;
+            watcher.Changed += OnChange;
+            watcher.Error += (_, _) => ScheduleRefresh();
+            watcher.EnableRaisingEvents = true;
+            _watchers.Add(watcher);
+        }
+        catch
+        {
+            watcher?.Dispose();
+        }
     }
 
-    private void OnRenamed(object sender, RenamedEventArgs e)
-    {
-        if (IsRelevant(e.FullPath) || IsRelevant(e.OldFullPath))
-            ScheduleRefresh();
-    }
-
-    private void OnError(object sender, ErrorEventArgs e)
-    {
-        // Buffer overflow or the folder went away: a rescan will resynchronise.
-        ScheduleRefresh();
-    }
-
-    private static bool IsRelevant(string path)
-    {
-        string ext = Path.GetExtension(path);
-        // Empty extension => a directory event (app folder added/removed).
-        return ext.Length == 0
-            || ext.Equals(".lnk", StringComparison.OrdinalIgnoreCase)
-            || ext.Equals(".url", StringComparison.OrdinalIgnoreCase);
-    }
+    private void OnChange(object sender, FileSystemEventArgs e) => ScheduleRefresh();
 
     private void ScheduleRefresh()
     {

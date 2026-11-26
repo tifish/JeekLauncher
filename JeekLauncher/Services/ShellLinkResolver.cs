@@ -12,8 +12,6 @@ internal static class ShellLinkResolver
 {
     private const uint SlgpRawPath = 0x4;
 
-    public static string? Resolve(string lnkPath) => ResolveInfo(lnkPath).Target;
-
     public static ShellLinkInfo ResolveInfo(string lnkPath)
     {
         IShellLinkW? link = null;
@@ -29,6 +27,11 @@ internal static class ShellLinkResolver
 
             var argsBuilder = new StringBuilder(1024);
             link.GetArguments(argsBuilder, argsBuilder.Capacity);
+            if (argsBuilder.Length == argsBuilder.Capacity - 1)
+            {
+                argsBuilder.EnsureCapacity(32768);
+                link.GetArguments(argsBuilder, argsBuilder.Capacity);
+            }
             string args = argsBuilder.ToString().Trim();
 
             return new ShellLinkInfo(

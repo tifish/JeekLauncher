@@ -2,48 +2,55 @@ using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using Jeek.Avalonia.Localization;
+using JeekLauncher.Models;
 using JeekLauncher.Services;
 using JeekTools;
 
 namespace JeekLauncher;
 
 /// <summary>
-/// Headless diagnostics (JeekLauncher.exe --selftest [all|search|watch|autostart|lang|quickwords]).
+/// Headless diagnostics (JeekLauncher.exe --selftest [all|search|watch|autostart|lang|quickwords|storage]).
 /// Exercises the real services without starting the GUI and writes a report to
 /// <c>%TEMP%\jeek-selftest.txt</c>.
 /// </summary>
 internal static class SelfTest
 {
-    public static void Run(string mode)
+    public static bool Run(string mode)
     {
         var report = new StringBuilder();
         bool all = mode == "all";
+        bool passed = true;
 
         if (all || mode == "search")
-            Section(report, "SEARCH", BuildSearchReport);
+            Section("SEARCH", BuildSearchReport);
         if (all || mode == "watch")
-            Section(report, "WATCH", BuildWatchReport);
+            Section("WATCH", BuildWatchReport);
         if (all || mode == "autostart")
-            Section(report, "AUTOSTART", BuildAutoStartReport);
+            Section("AUTOSTART", BuildAutoStartReport);
         if (all || mode == "lang")
-            Section(report, "LANG", BuildLangReport);
+            Section("LANG", BuildLangReport);
         if (all || mode == "quickwords")
-            Section(report, "QUICKWORDS", BuildQuickWordsReport);
+            Section("QUICKWORDS", BuildQuickWordsReport);
+        if (all || mode == "storage")
+            Section("STORAGE", CheckStorage);
 
         File.WriteAllText(Path.Combine(Path.GetTempPath(), "jeek-selftest.txt"), report.ToString());
-    }
+        return passed;
 
-    private static void Section(StringBuilder report, string title, Func<string> build)
-    {
-        report.AppendLine($"################  {title}  ################");
-        report.AppendLine();
-        report.AppendLine(build());
-        report.AppendLine();
+        void Section(string title, Func<(bool Passed, string Text)> build)
+        {
+            report.AppendLine($"################  {title}  ################");
+            var result = build();
+            report.AppendLine(result.Text);
+            report.AppendLine(result.Passed ? "RESULT: PASS" : "RESULT: FAIL");
+            report.AppendLine();
+            passed &= result.Passed;
+        }
     }
 
     // ---- Scan + search -----------------------------------------------------
 
-    private static string BuildSearchReport()
+    private static (bool, string) BuildSearchReport()
     {
         var report = new StringBuilder();
         void Line(string s = "") => report.AppendLine(s);
@@ -81,20 +88,35 @@ internal static class SelfTest
         Query("codex");    // packaged AppsFolder app (no shortcut file)
         Query("claude");   // packaged AppsFolder app
 
-        return report.ToString().TrimEnd();
+        return (CheckRanking(), report.ToString().TrimEnd());
+    }
+
+    private static bool CheckRanking()
+    {
+        static AppEntry Entry(string name) => new()
+        {
+            Name = name, Path = name, Initials = "a", SearchName = name, PinyinFull = name,
+        };
+        var entries = new[] { Entry("a"), Entry("aaaa") };
+        var usage = new UsageStore();
+        usage.Counts["a"] = 100;
+        usage.Counts["aaaa"] = 101;
+        var words = new QuickWordStore();
+        if (SearchEngine.Search("a", entries, usage, words)[0] != entries[1])
+            return false;
+        words.Set("a", "a");
+        return SearchEngine.Search("a", entries, usage, words)[0] == entries[0];
     }
 
     // ---- Directory watcher -------------------------------------------------
 
-    private static string BuildWatchReport()
+    private static (bool, string) BuildWatchReport()
     {
         var report = new StringBuilder();
 
-        string dir = Path.Combine(Path.GetTempPath(), "jeek-watchtest");
-        Directory.CreateDirectory(dir);
-        foreach (string f in Directory.GetFiles(dir))
-            File.Delete(f);
+        string dir = Directory.CreateTempSubdirectory("jeek-watchtest-").FullName;
 
+        bool passed;
         int fired = 0;
         using (var watcher = new DirectoryWatcher(() => Interlocked.Increment(ref fired)))
         {
@@ -106,6 +128,10 @@ internal static class SelfTest
             Thread.Sleep(1500);
             int afterCreate = fired;
 
+            File.AppendAllText(lnk, "edit");
+            Thread.Sleep(1500);
+            int afterEdit = fired;
+
             File.Delete(lnk);
             Thread.Sleep(1500);
             int afterDelete = fired;
@@ -114,22 +140,30 @@ internal static class SelfTest
             Thread.Sleep(1200);
             int afterIrrelevant = fired;
 
+            string folder = Path.Combine(dir, "Apps.1");
+            Directory.CreateDirectory(folder);
+            Thread.Sleep(1500);
+            int afterFolder = fired;
+            Directory.Delete(folder);
+            Thread.Sleep(1500);
+            int afterFolderDelete = fired;
+
             report.AppendLine($"fired after .lnk create : {afterCreate}  (expect >= 1)");
             report.AppendLine($"fired after .lnk delete : {afterDelete}  (expect > create)");
             report.AppendLine($"fired after .tmp create : {afterIrrelevant}  (expect == delete, .tmp ignored)");
             report.AppendLine();
-            report.AppendLine(afterCreate >= 1 && afterDelete > afterCreate && afterIrrelevant == afterDelete
-                ? "RESULT: PASS"
-                : "RESULT: FAIL");
+            report.AppendLine($"after edit: {afterEdit}, dotted folder create/delete: {afterFolder}/{afterFolderDelete}");
+            passed = afterCreate >= 1 && afterEdit > afterCreate && afterDelete > afterEdit
+                && afterIrrelevant == afterDelete && afterFolder > afterIrrelevant && afterFolderDelete > afterFolder;
         }
 
         try { Directory.Delete(dir, true); } catch { /* ignore */ }
-        return report.ToString().TrimEnd();
+        return (passed, report.ToString().TrimEnd());
     }
 
     // ---- Autostart ---------------------------------------------------------
 
-    private static string BuildAutoStartReport()
+    private static (bool, string) BuildAutoStartReport()
     {
         var report = new StringBuilder();
         bool liveEnabled = AutoStart.IsEnabled();
@@ -158,14 +192,12 @@ internal static class SelfTest
         report.AppendLine($"after on       : {afterOn}   (expect True)");
         report.AppendLine($"after off      : {afterOff}  (expect False)");
         report.AppendLine();
-        report.AppendLine(created && afterOn && !afterOff ? "RESULT: PASS" : "RESULT: FAIL");
-
-        return report.ToString().TrimEnd();
+        return (created && afterOn && !afterOff, report.ToString().TrimEnd());
     }
 
     // ---- Localization ------------------------------------------------------
 
-    private static string BuildLangReport()
+    private static (bool, string) BuildLangReport()
     {
         var report = new StringBuilder();
 
@@ -189,14 +221,12 @@ internal static class SelfTest
         bool pass = Localizer.Languages.Contains("en")
             && Localizer.Languages.Contains("zh")
             && Localizer.Get("TrayShow") != "TrayShow"; // key resolved, not echoed back
-        report.AppendLine(pass ? "RESULT: PASS" : "RESULT: FAIL");
-
-        return report.ToString().TrimEnd();
+        return (pass, report.ToString().TrimEnd());
     }
 
     // ---- QuickWords multi-machine merge ------------------------------------
 
-    private static string BuildQuickWordsReport()
+    private static (bool, string) BuildQuickWordsReport()
     {
         var report = new StringBuilder();
         var failures = new List<string>();
@@ -321,6 +351,13 @@ internal static class SelfTest
                 Check(afterRemote >= 1, $"ConfigWatcher fired on remote shard in QuickWords/ ({afterRemote})");
                 Check(afterTmp == afterRemote, $"ConfigWatcher ignored .tmp in QuickWords/ ({afterTmp} == {afterRemote})");
             }
+
+            string settingsPath = Path.Combine(watchRoot, "settings.json");
+            File.WriteAllText(settingsPath, "{}");
+            Storage.MarkSelfWrite(ConfigChangeKind.Settings, settingsPath, "{}");
+            Check(Storage.IsRecentSelfWrite(ConfigChangeKind.Settings, settingsPath), "Own settings write recognized");
+            File.WriteAllText(settingsPath, """{"Theme":"Dark"}""");
+            Check(!Storage.IsRecentSelfWrite(ConfigChangeKind.Settings, settingsPath), "Immediate external edit is observable");
         }
         finally
         {
@@ -328,7 +365,44 @@ internal static class SelfTest
         }
 
         report.AppendLine();
-        report.AppendLine(failures.Count == 0 ? "RESULT: PASS" : $"RESULT: FAIL ({failures.Count} failures)");
-        return report.ToString().TrimEnd();
+        return (failures.Count == 0, report.ToString().TrimEnd());
+    }
+
+    internal static (bool Passed, string Text) CheckStorage()
+    {
+        var dir = Directory.CreateTempSubdirectory("jeek-storage-");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "usage.json");
+            File.WriteAllText(path, """{"Counts":null}""");
+            var first = UsageStore.LoadFrom(path);
+            var second = UsageStore.LoadFrom(path);
+            first.Record("App");
+            first.SaveTo(path);
+            second.SaveTo(path);
+            second.Record("APP");
+            second.SaveTo(path);
+            bool counts = UsageStore.LoadFrom(path).GetCount("app") == 2;
+
+            var words = QuickWordStore.LoadFrom(dir.FullName, "test");
+            words.Set("first", "A");
+            words.SaveTo(dir.FullName);
+            var shard = Path.Combine(dir.FullName, "QuickWords", "test.json");
+            string original = File.ReadAllText(shard);
+            File.WriteAllText(shard, "{");
+            words.ReloadFrom(dir.FullName);
+            words.Set("second", "B");
+            words.SaveTo(dir.FullName);
+            bool preserved = File.ReadAllText(shard) == "{" && words.GetTarget("first") == "A";
+            File.WriteAllText(shard, original);
+            words.SaveTo(dir.FullName);
+            var saved = QuickWordStore.LoadFrom(dir.FullName, "test");
+            bool retried = saved.GetTarget("first") == "A" && saved.GetTarget("second") == "B";
+            bool separate = !Storage.IsValidCustomDirectory(Path.GetDirectoryName(Storage.LocalConfigDir));
+            bool ranking = CheckRanking();
+            return (counts && preserved && retried && separate && ranking,
+                $"concurrentCounts={counts} unreadableShardPreserved={preserved} pendingEditSaved={retried} separateConfigRoots={separate} ranking={ranking}");
+        }
+        finally { dir.Delete(recursive: true); }
     }
 }

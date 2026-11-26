@@ -55,6 +55,7 @@ public sealed class QuickWordStore
     }
 
     public string MachineName => _machineName;
+    internal bool HasPendingEdits => _pendingLocalEdits.Count > 0;
 
     /// <summary>Active (non-deleted) quick-word bindings merged across all machines.</summary>
     public IReadOnlyDictionary<string, string> Words => _activeWords;
@@ -148,12 +149,19 @@ public sealed class QuickWordStore
         return store;
     }
 
-    /// <summary>Re-read and merge all shards from disk in place without writing back (avoids sync echo).</summary>
-    public void ReloadFromDisk() => ReloadFrom(Storage.RoamableConfigDir);
+    /// <summary>Refresh from disk and retry any outstanding local edits.</summary>
+    public void ReloadFromDisk()
+    {
+        ReloadFrom(Storage.RoamableConfigDir);
+        if (HasPendingEdits)
+            Save();
+    }
 
     internal void ReloadFrom(string roamableConfigDir)
     {
         var disk = LoadMergedFromDisk(roamableConfigDir);
+        if (!disk.Complete && _loadedShards.Count > 0)
+            return; // Keep the last readable snapshot while a sync or edit is in progress.
         long maxTs = Math.Max(_maxSeenTimestamp, disk.MaxTimestamp);
 
         // Preserve any unsaved local edits if a previous save failed.
@@ -208,15 +216,13 @@ public sealed class QuickWordStore
         {
             string quickWordsDir = Path.Combine(roamableConfigDir, Storage.QuickWordsDirName);
             string shardPath = Path.Combine(quickWordsDir, $"{_machineName}.json");
-            bool isLiveRoamableDir = IsSameDirectory(roamableConfigDir, Storage.RoamableConfigDir);
-
-            if (isLiveRoamableDir)
-                Storage.MarkSelfWrite(ConfigChangeKind.QuickWords);
 
             Directory.CreateDirectory(quickWordsDir);
             using var lease = SharedDataFile.Acquire(shardPath);
 
             var disk = LoadMergedFromDisk(roamableConfigDir, ownShardPathToExcludeFromOtherActive: shardPath);
+            if (!disk.Complete)
+                throw new IOException("The quick-word files could not all be read. Local edits are pending.");
             long maxTs = Math.Max(_maxSeenTimestamp, disk.MaxTimestamp);
 
             if (carryOverEntries is not null)
@@ -261,13 +267,9 @@ public sealed class QuickWordStore
 
             string json = JsonSettingsFile.Serialize(shard);
 
-            if (isLiveRoamableDir)
-                Storage.MarkSelfWrite(ConfigChangeKind.QuickWords);
-
             WriteAllTextAtomicWithRetry(shardPath, json);
-
-            if (isLiveRoamableDir)
-                Storage.MarkSelfWrite(ConfigChangeKind.QuickWords);
+            if (string.Equals(shardPath, Storage.QuickWordsPath, StringComparison.OrdinalIgnoreCase))
+                Storage.MarkSelfWrite(ConfigChangeKind.QuickWords, shardPath, json);
 
             _entries = sortedEntries;
             _maxSeenTimestamp = maxTs;
@@ -324,6 +326,7 @@ public sealed class QuickWordStore
         var merged = new Dictionary<string, QuickWordEntry>(StringComparer.OrdinalIgnoreCase);
         var otherActive = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var loadedFiles = new List<string>();
+        bool complete = true;
         long maxTs = 0;
 
         string? excludedFullPath = ownShardPathToExcludeFromOtherActive is not null
@@ -332,9 +335,11 @@ public sealed class QuickWordStore
 
         // 1. Legacy Config/QuickWords.json as a ts = 0 fallback layer so upgrades stay seamless.
         string legacyPath = Path.GetFullPath(Path.Combine(roamableConfigDir, Storage.LegacyQuickWordsFileName));
-        if (File.Exists(legacyPath) && TryReadLegacyWords(legacyPath, out var legacyWords))
+        if (File.Exists(legacyPath))
         {
-            loadedFiles.Add(legacyPath);
+            complete = TryReadLegacyWords(legacyPath, out var legacyWords);
+            if (complete)
+                loadedFiles.Add(legacyPath);
             foreach (var (rawWord, target) in legacyWords)
             {
                 string word = NormalizeWord(rawWord);
@@ -364,6 +369,7 @@ public sealed class QuickWordStore
             }
             catch (Exception ex)
             {
+                complete = false;
                 Log.ZLogWarning($"Failed to enumerate QuickWords shards in {quickWordsDir}: {ex.Message}");
                 files = Array.Empty<string>();
             }
@@ -372,7 +378,10 @@ public sealed class QuickWordStore
             {
                 string filePath = Path.GetFullPath(rawPath);
                 if (!TryReadShard(filePath, out var shardEntries))
+                {
+                    complete = false;
                     continue;
+                }
 
                 loadedFiles.Add(filePath);
                 bool isOtherShard = excludedFullPath is null
@@ -395,7 +404,7 @@ public sealed class QuickWordStore
             }
         }
 
-        return new DiskMergeResult(merged, otherActive, loadedFiles, maxTs);
+        return new DiskMergeResult(merged, otherActive, loadedFiles, maxTs, complete);
     }
 
     private static bool TryReadLegacyWords(string path, out Dictionary<string, string> words)
@@ -655,20 +664,6 @@ public sealed class QuickWordStore
         Deleted = source.Deleted,
     };
 
-    private static bool IsSameDirectory(string a, string b)
-    {
-        try
-        {
-            string normA = Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            string normB = Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return string.Equals(normA, normB, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private sealed class QuickWordShard
     {
         public string Machine { get; set; } = "";
@@ -684,5 +679,6 @@ public sealed class QuickWordStore
         Dictionary<string, QuickWordEntry> Entries,
         HashSet<string> OtherActiveWords,
         List<string> LoadedFiles,
-        long MaxTimestamp);
+        long MaxTimestamp,
+        bool Complete);
 }

@@ -96,6 +96,11 @@ internal static class DebugMcpServer
         host.AddTool("search_probe", SearchProbeAsync);
         host.AddTool("entries_snapshot", EntriesSnapshotAsync);
         host.AddTool("rescan", _ => RescanAsync());
+        host.AddTool("storage_probe", _ => Task.Run(() =>
+        {
+            var check = SelfTest.CheckStorage();
+            return ToolText(check.Text, isError: !check.Passed);
+        }));
         host.AddTool("config_state", _ => ConfigStateAsync());
         host.AddTool("hotkey_state", _ => HotkeyStateAsync());
         host.AddTool("autostart_state", _ => Task.Run(() => ToolText(AutoStart.Describe())));
@@ -462,14 +467,16 @@ internal static class DebugMcpServer
             }
 
             sb.AppendLine();
-            sb.AppendLine("rank  launches  quickWord  name / initials / pinyin");
-            var rank = 0;
+            sb.AppendLine("rank  tier  launches  quickWord  name / initials / pinyin");
+            var normalized = InitialsHelper.Normalize(query);
+            var rank = 1;
             foreach (var entry in results.Take(limit))
             {
                 var isBound = boundId is not null
                               && string.Equals(boundId, entry.Id, StringComparison.OrdinalIgnoreCase);
+                var tier = normalized.Length == 0 ? 0 : SearchEngine.MatchTier(normalized, entry);
                 sb.AppendLine(
-                    $"{rank,4}  {usage.GetCount(entry.Id),8}  {(isBound ? "yes" : "no"),9}  "
+                    $"{rank,4}  {tier,4}  {usage.GetCount(entry.Id),8}  {(isBound ? "yes" : "no"),9}  "
                     + $"{entry.Name} | {entry.Initials} | {entry.PinyinFull}");
                 rank++;
             }
@@ -589,14 +596,14 @@ internal static class DebugMcpServer
             var configured = app.DebugSettings.Hotkey;
             var parsed = HotKeyDef.Parse(configured);
             var failure = app.DebugHotkeyFailure;
-            var ok = failure is null;
+            var ok = app.DebugHotkeyRegistered && failure is null;
 
             return (ok,
                 $"{(ok ? "PASS" : "FAIL")}: global hotkey registration\n"
                 + $"configured={configured}\n"
                 + $"parsedText={parsed.Text}\n"
                 + $"modifiers=0x{parsed.Modifiers:X} virtualKey=0x{parsed.VirtualKey:X}\n"
-                + $"registered={ok}\n"
+                + $"registered={app.DebugHotkeyRegistered}\n"
                 + $"failedHotkey={failure ?? "(none)"}");
         });
 
@@ -673,42 +680,22 @@ internal static class DebugMcpServer
                     if (string.IsNullOrWhiteSpace(word) || string.IsNullOrWhiteSpace(target))
                         throw new InvalidOperationException("'set' requires non-empty 'word' and 'target'.");
                     changed = store.Set(word, target);
-                    if (changed)
-                    {
-                        store.Save();
-                        app.DebugRefreshQuickWordsUi();
-                    }
                     break;
 
                 case "rename":
                     if (string.IsNullOrWhiteSpace(word) || string.IsNullOrWhiteSpace(newWord))
                         throw new InvalidOperationException("'rename' requires non-empty 'word' and 'new_word'.");
                     changed = store.Rename(word, newWord);
-                    if (changed)
-                    {
-                        store.Save();
-                        app.DebugRefreshQuickWordsUi();
-                    }
                     break;
 
                 case "remove":
                     if (string.IsNullOrWhiteSpace(word))
                         throw new InvalidOperationException("'remove' requires non-empty 'word'.");
                     changed = store.Remove(word);
-                    if (changed)
-                    {
-                        store.Save();
-                        app.DebugRefreshQuickWordsUi();
-                    }
                     break;
 
                 case "clear":
                     changed = store.Clear();
-                    if (changed)
-                    {
-                        store.Save();
-                        app.DebugRefreshQuickWordsUi();
-                    }
                     break;
 
                 case "reload":
@@ -721,7 +708,13 @@ internal static class DebugMcpServer
                         $"Unknown action '{action}'. Expected one of: set, rename, remove, clear, reload.");
             }
 
-            return $"action={action} changed={changed} activeQuickWords={store.Words.Count} "
+            if (store.HasPendingEdits && action != "reload")
+            {
+                store.Save();
+                app.RefreshQuickWordsUi();
+            }
+
+            return $"action={action} changed={changed} pendingSave={store.HasPendingEdits} activeQuickWords={store.Words.Count} "
                    + $"totalEntries={store.Entries.Count} loadedShards={store.LoadedShardFiles.Count}";
         });
 

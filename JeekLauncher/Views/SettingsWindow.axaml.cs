@@ -21,7 +21,6 @@ public partial class SettingsWindow : Window
     private readonly Action<StorageLocation, string, bool>? _onStorageLocationChange;
     private readonly Action? _onCheckUpdates;
     private bool? _initialAutoStart;
-    private bool _autoStartUserToggled;
 
     public SettingsWindow()
     {
@@ -55,11 +54,6 @@ public partial class SettingsWindow : Window
 
         // Query Task Scheduler off the UI thread so opening Settings stays instant.
         StartupCheck.IsEnabled = false;
-        StartupCheck.IsCheckedChanged += (_, _) =>
-        {
-            if (StartupCheck.IsEnabled)
-                _autoStartUserToggled = true;
-        };
         _ = LoadAutoStartStateAsync();
 
         // Populate code-built localized items and keep them in sync on language switches.
@@ -102,8 +96,7 @@ public partial class SettingsWindow : Window
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             _initialAutoStart = enabled;
-            if (!_autoStartUserToggled)
-                StartupCheck.IsChecked = enabled;
+            StartupCheck.IsChecked = enabled;
             StartupCheck.IsEnabled = true;
         });
     }
@@ -282,7 +275,7 @@ public partial class SettingsWindow : Window
             : StorageLocation.UserDirectory;
         string customDir = (CustomDirBox.Text ?? string.Empty).Trim();
         if (location == StorageLocation.CustomDirectory &&
-            (!Path.IsPathFullyQualified(customDir) ||
+            (!Storage.IsValidCustomDirectory(customDir) ||
              Storage.WouldMoveRoamableConfigIntoItself(location, customDir)))
         {
             ShowError(Localizer.Get("CustomDirRequired")); // keep the window open
@@ -319,7 +312,7 @@ public partial class SettingsWindow : Window
         if (hotkeyOk)
         {
             bool desiredAutoStart = StartupCheck.IsChecked == true;
-            if (StartupCheck.IsEnabled && (_autoStartUserToggled || _initialAutoStart != desiredAutoStart))
+            if (StartupCheck.IsEnabled && _initialAutoStart != desiredAutoStart)
                 _ = Task.Run(() => AutoStart.SetEnabled(desiredAutoStart));
             Close();
         }
@@ -352,7 +345,7 @@ public partial class SettingsWindow : Window
             // Not a choice: the portable folder is removed on the way out.
             if (!await MessageDialog.ShowConfirmAsync(title,
                     string.Format(Localizer.Get("MoveConfigRequired"), from, to),
-                    Localizer.Get("MoveConfigMove"), Localizer.Get("Cancel"), Icon))
+                    Localizer.Get("MoveConfigMove"), Localizer.Get("Cancel"), Icon, this))
             {
                 return false;
             }
@@ -363,7 +356,7 @@ public partial class SettingsWindow : Window
         {
             bool? choice = await MessageDialog.ShowChoiceAsync(title,
                 string.Format(Localizer.Get("MoveConfigQuestion"), from, to),
-                Localizer.Get("MoveConfigMove"), Localizer.Get("MoveConfigKeep"), Localizer.Get("Cancel"), Icon);
+                Localizer.Get("MoveConfigMove"), Localizer.Get("MoveConfigKeep"), Localizer.Get("Cancel"), Icon, this);
             if (choice is null)
                 return false;
 

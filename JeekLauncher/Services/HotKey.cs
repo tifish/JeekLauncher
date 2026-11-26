@@ -25,6 +25,7 @@ internal sealed class HotKey
     private uint _virtualKey;
 
     public Action? Pressed { get; set; }
+    public bool IsRegistered => _registered;
 
     /// <summary>
     /// Registers the hotkey. If the new combination is taken, the previously working
